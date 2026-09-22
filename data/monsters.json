@@ -1,0 +1,17 @@
+{
+  "wolf_pack": {
+    "id": "wolf_pack", "name": "Wolf Pack", "hp": 4, "attack": 3, "defence": 1,
+    "stance": "none", "reward": {"gold": 2, "power": 0, "relics": 0},
+    "description": "A lightly defended hunting pack. Defeat it to recover 2 Gold."
+  },
+  "stone_guardian": {
+    "id": "stone_guardian", "name": "Stone Guardian", "hp": 6, "attack": 4, "defence": 4,
+    "stance": "none", "reward": {"gold": 0, "power": 2, "relics": 0},
+    "description": "An enduring sentinel of the old realm. Defeat it to gain 2 Power."
+  },
+  "relic_wraith": {
+    "id": "relic_wraith", "name": "Relic Wraith", "hp": 5, "attack": 5, "defence": 3,
+    "stance": "none", "reward": {"gold": 0, "power": 0, "relics": 1},
+    "description": "A dangerous keeper of a lost Relic. Defeat it to claim the Relic."
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "assault": {
+    "id": "assault", "name": "Assault", "fate_cost": 0,
+    "base_modifier": 2, "versus_modifiers": {}, "loss_damage": 1,
+    "damage_reduction": 0, "minimum_damage": 1,
+    "retaliation_against": [], "retaliation_damage": 0, "suppresses_on_win": [],
+    "description": "+2 combat total. If you lose, suffer 1 additional damage."
+  },
+  "guard": {
+    "id": "guard", "name": "Guard", "fate_cost": 0,
+    "base_modifier": 1, "versus_modifiers": {}, "loss_damage": 0,
+    "damage_reduction": 1, "minimum_damage": 1,
+    "retaliation_against": [], "retaliation_damage": 0, "suppresses_on_win": [],
+    "description": "+1 combat total. On a loss, reduce incoming damage by 1, minimum 1."
+  },
+  "counter": {
+    "id": "counter", "name": "Counter", "fate_cost": 0,
+    "base_modifier": -1, "versus_modifiers": {"assault": 3}, "loss_damage": 0,
+    "damage_reduction": 0, "minimum_damage": 1,
+    "retaliation_against": ["assault"], "retaliation_damage": 1, "suppresses_on_win": [],
+    "description": "+3 against Assault, otherwise -1. Win while defending against Assault to retaliate for 1 damage."
+  },
+  "trick": {
+    "id": "trick", "name": "Trick", "fate_cost": 1,
+    "base_modifier": 0, "versus_modifiers": {"guard": 2, "counter": 2}, "loss_damage": 0,
+    "damage_reduction": 0, "minimum_damage": 1,
+    "retaliation_against": [], "retaliation_damage": 0,
+    "suppresses_on_win": ["damage_reduction", "retaliation_damage"],
+    "description": "Pay 1 Fate. +2 against Guard or Counter. A win suppresses their reduction or retaliation."
+  }
+}
