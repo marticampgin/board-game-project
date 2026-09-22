@@ -95,6 +95,12 @@ func _test_movement() -> void:
 	heroes.p1.hex = "0,0"
 	reached = Movement.reachable(map, heroes, "p1")
 	_expect(reached["2,-1"].cost == 2 and reached["2,-1"].path == ["0,0", "1,-1", "2,-1"], "Dijkstra returns cheapest approved path")
+	# Equal-cost road and mixed arrivals must both survive at a junction.
+	map = {"hexes": {}, "roads": [["0,0", "1,0"], ["1,0", "2,-1"], ["2,-1", "3,-1"], ["3,-1", "4,-1"]]}
+	for value in ["0,0", "1,0", "1,-1", "2,-1", "3,-1", "4,-1"]:
+		map.hexes[value] = {"terrain": "plains"}
+	reached = Movement.reachable(map, heroes, "p1")
+	_expect(reached.has("4,-1") and reached["4,-1"].road_only, "Road state survives an equal-cost mixed arrival at a junction")
 
 func _test_generation() -> void:
 	var first := Generator.generate(1)
@@ -119,3 +125,15 @@ func _test_generation() -> void:
 	broken = first.duplicate(true)
 	broken.locations.erase("minor_1")
 	_expect(not Generator.validate(broken).valid, "Validator rejects wrong location counts")
+	broken = first.duplicate(true)
+	var spawn: String = broken.sanctuaries[0]
+	var tower_hex: String = broken.locations.minor_1.hex
+	for neighbor in Hex.neighbors(spawn):
+		if broken.hexes.has(neighbor) and neighbor != tower_hex:
+			broken.hexes[neighbor].terrain = "mountain"
+	var choke_report := Generator.validate(broken)
+	var found_choke := false
+	for error in choke_report.errors:
+		if "Tower minor_1 can block sanctuary" in error:
+			found_choke = true
+	_expect(found_choke, "Validator detects tower chokepoint locking a sanctuary out of Worldspire")

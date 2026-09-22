@@ -107,11 +107,34 @@ static func validate(map: Dictionary) -> Dictionary:
 		if diagnostics.opportunity_spread > 0.25:
 			errors.append("Early opportunity score spread exceeds 25%%: %.3f" % diagnostics.opportunity_spread)
 	_validate_regions(hexes, errors)
+	_validate_alternate_routes(map, errors, diagnostics)
 	diagnostics.valid = errors.is_empty()
 	diagnostics.errors = errors
 	diagnostics.seed = map.get("seed", 0)
 	diagnostics.opportunity_definition = "Capture weight 3 within cost 6; ruin/camp weight 2 within cost 8; useful road within cost 1 weight 1; (max-min)/min <= 25%."
 	return diagnostics
+
+static func _validate_alternate_routes(map: Dictionary, errors: Array[String], diagnostics: Dictionary) -> void:
+	# A rival standing on one tower must not seal a sanctuary's only route
+	# to the central contest. Check topology separately from travel cost.
+	var tested := 0
+	for location in map.get("locations", {}).values():
+		if location.get("kind", "") not in ["minor_tower", "ancient_tower"]:
+			continue
+		var blocked: String = location.hex
+		var queue: Array[String] = ["0,0"]
+		var visited: Dictionary = {"0,0": true}
+		while not queue.is_empty():
+			var current: String = queue.pop_front()
+			for neighbor in Hex.neighbors(current):
+				if neighbor != blocked and not visited.has(neighbor) and Movement.is_walkable(map, neighbor):
+					visited[neighbor] = true
+					queue.append(neighbor)
+		for spawn in map.get("sanctuaries", []):
+			if not visited.has(spawn):
+				errors.append("Tower %s can block sanctuary %s from the Worldspire" % [location.id, spawn])
+		tested += 1
+	diagnostics.alternate_routes_checked = tested
 
 static func _validate_regions(hexes: Dictionary, errors: Array[String]) -> void:
 	var regions: Dictionary = {}
