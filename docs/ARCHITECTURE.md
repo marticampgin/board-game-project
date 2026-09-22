@@ -27,7 +27,9 @@ flowchart LR
 - `domain/resolvers/movement.gd`: weighted movement with occupied-hex blocking, terminal swamps, Ranger Forest cost, and separate all-road and mixed-path states.
 - `domain/resolvers/combat.gd`: pure, data-driven stance and damage arithmetic; no resource mutation or RNG draws.
 - `domain/resolvers/battle_flow.gd` and `class_flow.gd`: explicit combat, Fate, displacement, Bribe and Challenge windows; prepared class effects and movement interruption.
+- `domain/resolvers/economy.gd`, `equipment.gd`, `exploration.gd`, `world_events.gd`, and `victory.gd`: Settlement networks and Trade, purchases/effects, revealed reward choices, timed world changes, public claims and rituals.
 - `domain/bots/simple_bot.gd`: deterministic policy over legal actions, public stats and discovered locations. It never inspects opponents' sealed stances or plans and does not draw gameplay RNG.
+- `domain/bots/objective_policy.gd`: public victory goals, road obstructions, Relic pursuit, discovery frontiers and nearby claim interference.
 - `domain/definitions/`: validated class, rule, monster and tower-trait data; combat loads its stance table from JSON.
 - `domain/state/`: portable state, schema/definition validation and canonical checksums.
 - `domain/commands/` and `domain/events/`: stable intent/result/event foundations.
@@ -39,13 +41,15 @@ Gameplay RNG streams are derived from the master seed and isolated from one anot
 
 The native presentation creates board meshes and Controls from snapshots, submits commands, then animates emitted changes. Logic commits before animation, so interrupting a tween cannot change the result.
 
-`tools/realm.mjs` handles argument parsing, process invocation, locks and filesystem persistence. It writes JSON request/response files and launches `tools/game_cli.gd` with a literal argument array, avoiding shell interpretation of player input. That GDScript adapter uses the same `GameRules`, legal queries and `SimpleBot.choose(rules)` policy as other clients. The bot handles required decisions before scheduled actions and stops after a configured round count; it does not invent a winner. Simulations bound commands per round and surface invalid combat calculations immediately.
+`tools/realm.mjs` handles argument parsing, process invocation, locks and filesystem persistence. It writes JSON request/response files and launches `tools/game_cli.gd` with a literal argument array, avoiding shell interpretation of player input. That GDScript adapter uses the same `GameRules`, legal queries and `SimpleBot.choose(rules)` policy as other clients. The bot handles required decisions before scheduled actions, then pursues class-favored victory goals. Simulations stop on an actual model victory or configured limit; they never invent a winner. Per-round command bounds and invalid-calculation checks surface stalls promptly. `tools/match_simulation.gd` runs fresh games and replays accepted history for the 25-match regression report.
 
 `ActionLogger.execute` wraps the command boundary for native UI and CLI. Each accepted or rejected attempt records the complete command, source, reason, before/after checksums and versions, phase, pending-decision stage, RNG snapshots, and emitted events. UTC timestamps and durations exist only in diagnostics; they are excluded from authoritative state and replay hashes. Logs can render as JSONL or readable event lines. The current local prototype log includes all four seats' development state and is not a future public multiplayer payload.
 
 ## Persistence and replay
 
 The snapshot contains schema/content versions, seed, phase, actors, map, heroes, plans/readiness, RNG streams, event history and accepted commands. Definition IDs are validated on load. CLI mutation takes an exclusive per-save lock, writes and flushes a temporary file, retains the preceding `.bak`, then renames the temporary file over the save. Rejected commands append diagnostics but do not rewrite the save. Snapshot and diagnostic files are separate; a crash between the two can leave a final attempted command only in the diagnostic log, which is why replay uses accepted commands from the snapshot.
+
+`services/snapshot_store.gd` provides native/browser manual saves and rotating autosaves. It validates the snapshot, writes an envelope with `save_format`, `engine_version`, `snapshot`, and UI metadata, flushes the temporary file, preserves `.bak`, and replaces atomically. Browser saves explicitly sync the virtual filesystem. CLI accepts both raw snapshots and this envelope, preserving UI metadata when continuing an envelope save. Secrets and pending decisions are saved authoritatively; the local save file is not a public client observation.
 
 `replay` starts from the original seed and applies each accepted command through the authoritative validator. It compares the final checksum, including ordered events and RNG state. Read-only state/legal/map/replay queries never consume gameplay RNG. Tests additionally save and restore before every action in the three-round acceptance script and compare deterministic continuation.
 

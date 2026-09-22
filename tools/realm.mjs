@@ -10,6 +10,7 @@ const help = `Shattered Realm — the same Godot rules from your terminal
   npm run cli -- new --seed 20260922
   npm run cli -- state [--json]
   npm run cli -- legal [p1]
+  npm run cli -- progress [p1]
   npm run cli -- advance
   npm run cli -- plan p1 '{}'
   npm run cli -- ready p1
@@ -165,8 +166,8 @@ async function main() {
     if (options['command-id']) command.command_id = options['command-id'];
     request.operation = 'command';
     request.command = command;
-  } else if (!['new', 'state', 'legal', 'simulate', 'bot-step', 'replay', 'validate-map'].includes(operation)) throw new Error(`Unknown command ${operation}. Use help.`);
-  if (operation === 'legal') request.player_id = player ?? '';
+  } else if (!['new', 'state', 'legal', 'progress', 'simulate', 'bot-step', 'replay', 'validate-map'].includes(operation)) throw new Error(`Unknown command ${operation}. Use help.`);
+  if (operation === 'legal' || operation === 'progress') request.player_id = player ?? '';
   if (operation === 'new' || operation === 'validate-map') request.seed = integer(options.seed, 20260922, 'seed', -2147483648, 2147483647);
   if (operation === 'validate-map') request.count = integer(options.count, 1, 'count', 1, 10000);
   if (operation === 'simulate') request.rounds = integer(options.rounds, 3, 'rounds', 1, 1000);
@@ -174,12 +175,19 @@ async function main() {
   await mkdir(path.dirname(stateFile), { recursive: true });
   let lock;
   let temporary;
+  let saveEnvelope;
   try {
     if (mutations) {
       try { lock = await open(`${stateFile}.lock`, 'wx'); await lock.writeFile(String(process.pid)); }
       catch (error) { if (error.code === 'EEXIST') throw new Error(`Save is locked: ${stateFile}.lock. Another CLI writer is running; remove a stale lock only after it exits.`); throw error; }
     }
-    if (!['new', 'validate-map'].includes(request.operation)) request.snapshot = await readJson(stateFile);
+    if (!['new', 'validate-map'].includes(request.operation)) {
+      const loaded = await readJson(stateFile);
+      if (loaded?.save_format === 1 && loaded.snapshot && typeof loaded.snapshot === 'object') {
+        saveEnvelope = loaded;
+        request.snapshot = loaded.snapshot;
+      } else request.snapshot = loaded;
+    }
     temporary = await mkdtemp(path.join(tmpdir(), 'shattered-realm-'));
     const requestPath = path.join(temporary, 'request.json');
     const responsePath = path.join(temporary, 'response.json');
@@ -191,7 +199,7 @@ async function main() {
     let response;
     try { response = JSON.parse(await readFile(responsePath, 'utf8')); }
     catch (error) { throw new Error(`Godot did not write a valid response: ${error.message}\n${result.stderr}\n${result.stdout}`); }
-    if (response.snapshot && (request.operation === 'new' || response.mutated)) await atomicSave(stateFile, response.snapshot);
+    if (response.snapshot && (request.operation === 'new' || response.mutated)) await atomicSave(stateFile, saveEnvelope ? { ...saveEnvelope, snapshot: response.snapshot } : response.snapshot);
     console.log(options.json ? JSON.stringify(response, null, 2) : summary(response));
     if (!response.ok) process.exitCode = response.result ? 2 : 1;
     if (response.logging_error) { console.error(response.logging_error); process.exitCode = 1; }

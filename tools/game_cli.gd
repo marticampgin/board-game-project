@@ -65,6 +65,16 @@ func _handle(request: Dictionary) -> Dictionary:
 				player_id = rules.current_actor()
 			response["player_id"] = player_id
 			response["legal"] = rules.legal_actions(player_id)
+		"progress":
+			var player_id: String = str(request.get("player_id", ""))
+			var progress: Dictionary = {}
+			if not player_id.is_empty() and not rules.state.data["heroes"].has(player_id):
+				return {"ok": false, "error": "Unknown player: " + player_id}
+			for player: String in rules.state.data["heroes"]:
+				if player_id.is_empty() or player == player_id: progress[player] = rules.victory_progress(player)
+			response["progress"] = progress
+			response["claims"] = rules.state.data.get("victory_claims", {}).duplicate(true)
+			response["victory"] = rules.state.data.get("victory", {}).duplicate(true)
 		"command":
 			var result: Dictionary = logger.execute(rules, request.get("command", {}), "cli")
 			response["result"] = result
@@ -136,4 +146,25 @@ func _replay(rules: RefCounted) -> Dictionary:
 			return {"ok": false, "error": "Replay command rejected.", "index": count, "command": command, "result": result}
 		count += 1
 	var matches: bool = replay.checksum() == rules.checksum()
-	return {"ok": matches, "replayed_commands": count, "replay_checksum": replay.checksum(), "matches": matches}
+	var response: Dictionary = {"ok": matches, "replayed_commands": count, "replay_checksum": replay.checksum(), "matches": matches}
+	if not matches:
+		var differences: Array[Dictionary] = []
+		_snapshot_differences(original, replay.snapshot(), "$", differences)
+		response["differences"] = differences
+	return response
+
+func _snapshot_differences(expected: Variant, actual: Variant, path_value: String, differences: Array[Dictionary]) -> void:
+	if differences.size() >= 12 or expected == actual: return
+	if expected is Dictionary and actual is Dictionary:
+		var keys: Array = expected.keys()
+		for key: Variant in actual.keys():
+			if not keys.has(key): keys.append(key)
+		keys.sort()
+		for key: Variant in keys:
+			_snapshot_differences(expected.get(key, "<missing>"), actual.get(key, "<missing>"), path_value + "." + str(key), differences)
+	elif expected is Array and actual is Array:
+		if expected.size() != actual.size(): differences.append({"path": path_value + ".length", "expected": expected.size(), "actual": actual.size()})
+		for index: int in range(mini(expected.size(), actual.size())):
+			_snapshot_differences(expected[index], actual[index], path_value + "[%d]" % index, differences)
+	else:
+		differences.append({"path": path_value, "expected": expected, "actual": actual})

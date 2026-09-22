@@ -55,6 +55,15 @@ test('CLI persists shared rules, records rejected attempts, simulates and verifi
       if (!entry.accepted) assert.equal(entry.checksum_before, entry.checksum_after);
     }
     assert.ok(JSON.parse(readFileSync(`${state}.bak`, 'utf8')).state_version < simulated.snapshot.state_version);
+    const guiSave = path.join(directory, 'gui-save.json');
+    const metadata = { mode: 'solo', human_player: 'p2' };
+    writeFileSync(guiSave, JSON.stringify({ save_format: 1, engine_version: '4.7.2.stable', snapshot: simulated.snapshot, metadata }));
+    const resumed = invoke(guiSave, ['advance']);
+    assert.equal(resumed.snapshot.phase, 'planning');
+    const envelope = JSON.parse(readFileSync(guiSave, 'utf8'));
+    assert.equal(envelope.save_format, 1);
+    assert.deepEqual(envelope.metadata, metadata, 'CLI continuation must preserve UI save metadata');
+    assert.equal(envelope.snapshot.state_version, simulated.snapshot.state_version + 1);
   } finally {
     assert.equal(path.dirname(path.resolve(directory)), path.resolve(tmpdir()));
     assert.ok(path.basename(directory).startsWith('realm-cli-test-'));

@@ -12,8 +12,19 @@ static func run_match(seed_value: int, maximum_rounds: int = 40, preferences: Di
 	var attempts: int = 0
 	var failure: String = ""
 	var started: int = Time.get_ticks_msec()
+	var last_restored_round: int = 0
 	while int(rules.state.data["round_number"]) <= maximum_rounds and rules.state.data.get("victory", {}).is_empty():
 		var before_round: int = int(rules.state.data["round_number"])
+		# Resume each new round from actual JSON, then replay from an untouched new
+		# game. This catches dictionary-insertion ordering bugs hidden by same-process runs.
+		if before_round != last_restored_round:
+			var prior_hash: String = rules.checksum()
+			var continued: RefCounted = Rules.from_snapshot(JSON.parse_string(JSON.stringify(rules.snapshot())))
+			if continued == null or continued.checksum() != prior_hash:
+				failure = "round_snapshot_roundtrip_failed"
+				break
+			rules = continued
+			last_restored_round = before_round
 		if int(commands_per_round.get(before_round, 0)) >= 120:
 			failure = "command_limit_exceeded"
 			break
@@ -59,7 +70,7 @@ static func run_match(seed_value: int, maximum_rounds: int = 40, preferences: Di
 	for hero: Dictionary in rules.state.data["heroes"].values():
 		resources[hero["id"]] = {"class_id": hero["class_id"], "hp": hero["hp"], "gold": hero["gold"], "power": hero["power"], "fate": hero["fate"], "relics": hero["relics"].size()}
 	return {
-		"seed": seed_value, "finished": not victory.is_empty() and failure.is_empty(),
+		"seed": seed_value, "content_version": rules.state.data.get("content_version", ""), "finished": not victory.is_empty() and failure.is_empty(),
 		"victory": victory, "rounds": int(victory.get("round", mini(maximum_rounds, int(rules.state.data["round_number"])))) ,
 		"commands": attempts, "command_counts": commands, "event_counts": events,
 		"resources": resources, "checksum": checksum, "replay_matches": replay_matches,
