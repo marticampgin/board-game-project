@@ -2,6 +2,7 @@ extends RefCounted
 ## Portable authoritative state. Validation rejects unknown schemas and definitions.
 const Catalog = preload("res://scripts/domain/definitions/definition_catalog.gd")
 const Enums = preload("res://scripts/domain/game_enums.gd")
+const Combat = preload("res://scripts/domain/resolvers/combat.gd")
 var data: Dictionary = {}
 
 func _init(values: Dictionary = {}) -> void:
@@ -127,6 +128,7 @@ static func validation_errors(values: Dictionary) -> Array[String]:
 		var hero: Dictionary = values.heroes[player_id]
 		if hero.get("id", "") != player_id or hero.get("player_id", "") != player_id:
 			errors.append("INVALID_HERO_ID:" + player_id)
+		if not hero.get("name") is String: errors.append("INVALID_HERO_NAME")
 		if not catalog.classes.has(hero.get("class_id", "")):
 			errors.append("UNKNOWN_CLASS:" + player_id)
 		if not map.hexes.has(hero.get("hex", "")) or not map.sanctuaries.has(hero.get("sanctuary", "")):
@@ -281,6 +283,7 @@ static func _validate_conflict_state(values: Dictionary, catalog: RefCounted, er
 			continue
 		if monster.get("id", "") != monster_id or not catalog.monsters.has(monster.get("definition_id", "")):
 			errors.append("UNKNOWN_MONSTER_DEFINITION:" + monster_id)
+		if not monster.get("name") is String: errors.append("INVALID_MONSTER_NAME")
 		if not values.map.hexes.has(monster.get("hex", "")) or not values.map.locations.has(monster.get("camp_id", "")):
 			errors.append("INVALID_MONSTER_LOCATION:" + monster_id)
 		elif values.map.locations[monster.camp_id].hex != monster.hex:
@@ -343,10 +346,20 @@ static func _validate_conflict_state(values: Dictionary, catalog: RefCounted, er
 		if not errors.is_empty(): return
 		for participant: String in battle.stances:
 			if participant not in [battle.attacker_id, battle.defender_id] or battle.stances[participant] not in ["assault", "guard", "counter", "trick", "none"]: errors.append("INVALID_STORED_STANCE")
+			if values.heroes.has(participant) and battle.stances[participant] == "none": errors.append("HERO_WITHOUT_STANCE")
+			if battle.stage == "stances" and values.heroes.has(participant) and battle.stances[participant] == "trick" and int(values.heroes[participant].fate) < 1: errors.append("UNAFFORDABLE_STORED_STANCE")
+		if battle.get("contested_hex", "") != opponents[battle.defender_id].hex: errors.append("COMBAT_LOCATION_MISMATCH")
+		for field: String in ["attacker_modifier", "defender_modifier", "attacker_die_modifier", "defender_die_modifier"]:
+			if not _integer(battle.modifiers.get(field)): errors.append("INVALID_STORED_MODIFIER")
+		for field: String in ["attacker_modifiers", "defender_modifiers"]:
+			if not battle.modifiers.get(field) is Dictionary: errors.append("INVALID_STORED_MODIFIER_PARTS")
 		if battle.stage != "stances":
 			if battle.stances.size() != 2 or battle.dice.size() != 2: errors.append("INCOMPLETE_REVEALED_COMBAT")
 			for side: String in ["attacker", "defender"]:
 				if not _integer(battle.dice.get(side)) or int(battle.dice.get(side, 0)) < 1 or int(battle.dice.get(side, 0)) > 6: errors.append("INVALID_COMBAT_DIE")
+			if errors.is_empty():
+				var calculated: Dictionary = Combat.evaluate(values.heroes[battle.attacker_id], opponents[battle.defender_id], battle.stances[battle.attacker_id], battle.stances[battle.defender_id], int(battle.dice.attacker), int(battle.dice.defender), battle.modifiers)
+				if not calculated.is_valid or canonical_json(calculated) != canonical_json(battle.calculation): errors.append("COMBAT_CALCULATION_MISMATCH")
 		if battle.stage in ["fate_defender", "displacement"] and battle.defender_kind != "hero": errors.append("MONSTER_DECISION_WINDOW")
 	if not reaction.is_empty():
 		if not values.heroes.has(reaction.get("actor_id", "")) or reaction.get("choices", []) != ["accept", "decline"]: errors.append("INVALID_REACTION_OWNER")
@@ -354,8 +367,14 @@ static func _validate_conflict_state(values: Dictionary, catalog: RefCounted, er
 			if movement.is_empty() or not battle.is_empty(): errors.append("INVALID_CHALLENGE_CONTEXT")
 		elif reaction.get("kind", "") in ["bribe_offer", "bribe_response"]:
 			if battle.is_empty() or not movement.is_empty(): errors.append("INVALID_BRIBE_CONTEXT")
+			elif reaction.actor_id != (battle.defender_id if reaction.kind == "bribe_offer" else battle.attacker_id): errors.append("INVALID_BRIBE_DECISION_OWNER")
 		else: errors.append("INVALID_REACTION_KIND")
 	if not movement.is_empty():
 		if not values.heroes.has(movement.get("actor_id", "")) or movement.get("actor_id", "") != values.initiative_order[values.current_actor_index]: errors.append("INVALID_MOVEMENT_ACTOR")
 		if reaction.get("kind", "") != "challenge": errors.append("MOVEMENT_WITHOUT_REACTION")
 		if not movement.get("path") is Array or not movement.get("route") is Dictionary or not _integer(movement.get("index")) or not movement.get("declined_challenges") is Array: errors.append("INVALID_PENDING_MOVEMENT")
+		if errors.is_empty():
+			if not movement.route.get("path") is Array or movement.path.is_empty() or movement.route.path.size() <= int(movement.index) or int(movement.index) != movement.path.size():
+				errors.append("INVALID_MOVEMENT_PATH")
+			elif movement.path.back() != values.heroes[movement.actor_id].hex or movement.path[0] != movement.get("origin", "") or movement.route.path.back() != movement.get("target", ""):
+				errors.append("MOVEMENT_PATH_POSITION_MISMATCH")

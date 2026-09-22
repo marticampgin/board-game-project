@@ -300,3 +300,12 @@ func _test_pending_snapshot_rejections() -> void:
 			"monster": bad.monsters.monster_1.definition_id = "unknown"
 			"phase": bad.phase = "resolution"
 		_check(Rules.from_snapshot(bad) == null, "Reject malformed combat snapshot: " + field)
+	_send(game, {"type": "choose_stance", "player_id": "p1", "stance": "guard"})
+	_send(game, {"type": "choose_stance", "player_id": "p2", "stance": "guard"})
+	for field: String in ["calculation", "dice", "modifiers"]:
+		var bad: Dictionary = game.snapshot()
+		match field:
+			"calculation": bad.pending_combat.calculation = {}
+			"dice": bad.pending_combat.dice.attacker = 7
+			"modifiers": bad.pending_combat.modifiers.attacker_modifier = "unknown"
+		_check(Rules.from_snapshot(bad) == null, "Reject malformed revealed combat continuation: " + field)
