@@ -24,7 +24,7 @@ var auto_drive: bool = true
 var bot_interval_seconds: float = 0.25
 var reaction_timeout_seconds: float = 20.0
 var planning_timeout_seconds: float = 60.0
-var action_timeout_seconds: float = 90.0
+var action_timeout_seconds: float = 20.0
 var log_path: String = "user://logs/network_actions.jsonl"
 var action_log: RefCounted
 var next_sequence: int = 1
