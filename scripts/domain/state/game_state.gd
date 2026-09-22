@@ -222,6 +222,7 @@ static func validation_errors(values: Dictionary) -> Array[String]:
 	for player_id: Variant in values.plans:
 		if not values.heroes.has(player_id) or not values.plans[player_id] is Dictionary:
 			errors.append("INVALID_PLAN")
+	_validate_phase_consistency(values, errors)
 	for index: int in values.events.size():
 		var event: Variant = values.events[index]
 		if not event is Dictionary or event.get("sequence", -1) != index + 1 or not event.get("type") is String or not event.get("data") is Dictionary:
@@ -230,6 +231,36 @@ static func validation_errors(values: Dictionary) -> Array[String]:
 		if not command is Dictionary or not command.get("type") is String or not Enums.COMMAND_IDS.has(command.type):
 			errors.append("INVALID_COMMAND_RECORD")
 	return errors
+
+static func _validate_phase_consistency(values: Dictionary, errors: Array[String]) -> void:
+	var phase: String = values.phase
+	var expected_cycle: int = {"cycle_1": 1, "cycle_2": 2, "bonus": 3}.get(phase, 0)
+	if int(values.action_cycle) != expected_cycle:
+		errors.append("PHASE_ACTION_CYCLE_MISMATCH")
+	if phase not in ["cycle_1", "cycle_2"] and int(values.current_actor_index) != 0:
+		errors.append("PHASE_ACTOR_INDEX_MISMATCH")
+	var initiative_resolved: bool = phase in ["initiative", "cycle_1", "cycle_2", "bonus", "resolution"]
+	# A later World/Planning phase retains last round's order for the HUD.
+	var needs_order: bool = initiative_resolved or int(values.round_number) > 1
+	if values.initiative_order.size() != (4 if needs_order else 0):
+		errors.append("PHASE_INITIATIVE_ORDER_MISMATCH")
+	if values.initiative_scores.size() != values.initiative_order.size():
+		errors.append("INITIATIVE_SCORE_COUNT_MISMATCH")
+	for player_id: Variant in values.initiative_order:
+		if not values.initiative_scores.has(player_id) or not _integer(values.initiative_scores[player_id]):
+			errors.append("INVALID_INITIATIVE_SCORE")
+	if initiative_resolved:
+		if values.ready.size() != 4 or values.plans.size() != 4:
+			errors.append("PHASE_PLANNING_INCOMPLETE")
+	elif phase == "world":
+		if not values.ready.is_empty() or not values.plans.is_empty():
+			errors.append("WORLD_PLANNING_NOT_RESET")
+	elif phase == "planning" and values.ready.size() >= 4:
+		# The fourth Ready command transitions atomically to Initiative.
+		errors.append("PLANNING_ALREADY_COMPLETE")
+	for player_id: Variant in values.ready:
+		if not values.plans.has(player_id):
+			errors.append("READY_WITHOUT_PLAN")
 
 static func _integer(value: Variant) -> bool:
 	return (value is int or value is float) and is_finite(float(value)) and float(value) == floor(float(value))

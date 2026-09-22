@@ -36,6 +36,9 @@ static func from_snapshot(values: Dictionary) -> RefCounted:
 
 func _start_game(seed: int) -> void:
 	var map: Dictionary = Generator.generate(seed)
+	# Generation owns an isolated instance, then hands its stream state into the
+	# match so diagnostics and saved RNG continuation include every map draw.
+	_rng.restore(map.report.rng)
 	var heroes: Dictionary = {}
 	for seat: int in range(4):
 		var player_id: String = Enums.PLAYER_IDS[seat]

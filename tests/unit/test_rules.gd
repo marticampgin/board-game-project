@@ -9,6 +9,7 @@ func run() -> Array[String]:
 	errors.clear()
 	_test_definitions_and_initial_state()
 	_test_serialization_and_rejection()
+	_test_snapshot_phase_invariants()
 	_test_guards_and_planning()
 	_test_rounds_and_initiative()
 	_test_movement_capture_income()
@@ -56,6 +57,8 @@ func _test_definitions_and_initial_state() -> void:
 	_check(game.state.data.phase == "world" and game.state.data.round_number == 1, "Starts at round 1 World")
 	_check(game.current_actor().is_empty(), "World has no active hero")
 	_check(game.snapshot().map.hexes.size() == 61, "Logical board contains 61 hexes")
+	_check(game.state.data.rng.streams.map.draw_index > 0, "Authoritative RNG includes map generation draw count")
+	_check(game.state.data.rng == game.state.data.map.report.rng, "Map stream handoff preserves every generator RNG state")
 	var expected: Dictionary = {"p1": [8, 3, 2, 5], "p2": [12, 5, 4, 2], "p3": [9, 2, 3, 3], "p4": [9, 3, 2, 3]}
 	for player_id: String in expected:
 		var hero: Dictionary = game.state.data.heroes[player_id]
@@ -98,6 +101,50 @@ func _test_serialization_and_rejection() -> void:
 	_reject_unchanged(game, {"type": "move", "player_id": "p1", "target": "0,0"}, "WRONG_PHASE")
 	_reject_unchanged(game, {"type": "ready", "player_id": "p99"}, "UNKNOWN_PLAYER")
 	_reject_unchanged(game, {"type": "advance", "node": RefCounted.new()}, "INVALID_COMMAND")
+
+func _test_snapshot_phase_invariants() -> void:
+	var game: RefCounted = Rules.new(991)
+	var checkpoints: Array[Dictionary] = [game.snapshot()]
+	_accept(game, {"type": "advance"})
+	checkpoints.append(game.snapshot())
+	for player_id: String in ["p1", "p2", "p3", "p4"]:
+		_accept(game, {"type": "ready", "player_id": player_id})
+	checkpoints.append(game.snapshot())
+	_accept(game, {"type": "advance"})
+	checkpoints.append(game.snapshot())
+	for cycle: int in range(2):
+		for action: int in range(4):
+			_accept(game, {"type": "pass", "player_id": game.current_actor()})
+		checkpoints.append(game.snapshot())
+	_accept(game, {"type": "advance"})
+	checkpoints.append(game.snapshot())
+	for checkpoint: Dictionary in checkpoints:
+		_check(Rules.from_snapshot(checkpoint) != null, "Valid checkpoint restores in " + checkpoint.phase)
+		var bad: Dictionary = checkpoint.duplicate(true)
+		bad.action_cycle += 10
+		_check(Rules.from_snapshot(bad) == null, "Reject action-cycle mismatch in " + checkpoint.phase)
+		bad = checkpoint.duplicate(true)
+		bad.current_actor_index = -1
+		_check(Rules.from_snapshot(bad) == null, "Reject invalid actor index in " + checkpoint.phase)
+		if checkpoint.phase in ["initiative", "cycle_1", "cycle_2", "bonus", "resolution"]:
+			bad = checkpoint.duplicate(true)
+			bad.initiative_order = []
+			_check(Rules.from_snapshot(bad) == null, "Reject missing initiative order before advance in " + checkpoint.phase)
+			bad = checkpoint.duplicate(true)
+			bad.ready = []
+			_check(Rules.from_snapshot(bad) == null, "Reject unresolved planning in " + checkpoint.phase)
+			bad = checkpoint.duplicate(true)
+			bad.initiative_scores.p1 = "invalid"
+			_check(Rules.from_snapshot(bad) == null, "Reject malformed score in " + checkpoint.phase)
+	var deadlocked: Dictionary = checkpoints[1].duplicate(true)
+	deadlocked.ready = ["p1", "p2", "p3", "p4"]
+	deadlocked.plans = {"p1": {}, "p2": {}, "p3": {}, "p4": {}}
+	_check(Rules.from_snapshot(deadlocked) == null, "Reject Planning with all players already ready")
+	var incomplete: Dictionary = checkpoints[1].duplicate(true)
+	incomplete.ready = ["p1"]
+	_check(Rules.from_snapshot(incomplete) == null, "Reject Ready without a stored plan")
+	_accept(game, {"type": "advance"})
+	_check(Rules.from_snapshot(game.snapshot()) != null, "Next World valid with last round initiative retained")
 
 func _test_guards_and_planning() -> void:
 	var game: RefCounted = Rules.new(42)
