@@ -1,0 +1,5 @@
+{
+  "conquest":{"id":"conquest","name":"Conquest","ancient_towers":4,"requires_worldspire":true,"response_rounds":1},
+  "dominion":{"id":"dominion","name":"Dominion","settlements":2,"gold":15,"response_rounds":1},
+  "ascension":{"id":"ascension","name":"Ascension","relics":3,"location_id":"worldspire"}
+}
