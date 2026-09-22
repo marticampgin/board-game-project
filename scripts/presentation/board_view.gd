@@ -6,7 +6,7 @@ signal hex_hovered(hex: String)
 
 const Hex = preload("res://scripts/domain/hex/hex.gd")
 const TEAM: Array[Color] = [Color("6bcab2"), Color("e18d6e"), Color("e1bd70"), Color("ac99d6")]
-const TERRAIN: Dictionary = {"plains": Color("547765"), "forest": Color("345949"), "swamp": Color("536774"), "mountain": Color("67727e"), "water": Color("2c647d")}
+const TERRAIN: Dictionary = {"plains": Color("4f6b5c"), "forest": Color("304e43"), "swamp": Color("495d68"), "mountain": Color("606c77"), "water": Color("2a6076")}
 
 var camera: Camera3D
 var tiles: Node3D
@@ -18,7 +18,7 @@ var heroes: Dictionary = {}
 var map_data: Dictionary = {}
 var focus_point: Vector3 = Vector3.ZERO
 var yaw: float = 0.0
-var zoom: float = 15.2
+var zoom: float = 12.8
 var selected: String = ""
 var hovered: String = ""
 var reachable: Dictionary = {}
@@ -45,19 +45,19 @@ func _ready() -> void:
 	settings.background_color = Color("14232c")
 	settings.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	settings.ambient_light_color = Color("a7c5ce")
-	settings.ambient_light_energy = 0.65
+	settings.ambient_light_energy = 0.40
 	environment.environment = settings
 	add_child(environment)
 	var light := DirectionalLight3D.new()
 	light.rotation_degrees = Vector3(-55, -35, 0)
 	light.light_color = Color("ffe8c6")
-	light.light_energy = 1.2
+	light.light_energy = 0.88
 	light.shadow_enabled = true
 	add_child(light)
 	var fill := DirectionalLight3D.new()
 	fill.rotation_degrees = Vector3(-35, 140, 0)
 	fill.light_color = Color("84bacb")
-	fill.light_energy = 0.35
+	fill.light_energy = 0.24
 	add_child(fill)
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
@@ -101,7 +101,7 @@ func focus_hex(hex: String) -> void:
 func reset_camera() -> void:
 	focus_point = Vector3.ZERO
 	yaw = 0.0
-	zoom = 15.2
+	zoom = 12.8
 	_update_camera()
 
 func _material(color: Color, glow: bool = false) -> StandardMaterial3D:

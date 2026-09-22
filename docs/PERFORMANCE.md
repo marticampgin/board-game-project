@@ -18,13 +18,13 @@ Godot 4.7.2 stable, Windows, NVIDIA GeForce RTX 4070, OpenGL 3.3 / driver 591.86
 
 | Measurement | Result |
 | --- | ---: |
-| Sample duration | 10.001 s |
-| Average frame rate | 1,102 FPS |
-| Median / 95th percentile frame time | 0.815 / 0.931 ms |
-| Median / maximum draw calls per frame | 811 / 851 |
-| Median / 95th percentile command plus UI refresh | 5.543 / 13.881 ms |
-| Last board reconciliation | 0.876 ms |
-| Live nodes at end | 782 |
+| Sample duration | 10.002 s |
+| Average frame rate | 1,118 FPS |
+| Median / 95th percentile frame time | 0.805 / 0.904 ms |
+| Median / maximum draw calls per frame | 813 / 853 |
+| Median / 95th percentile command plus UI refresh | 5.431 / 13.904 ms |
+| Last board reconciliation | 0.857 ms |
+| Live nodes at end | 807 |
 | Shared cached materials / meshes | 82 / 41 |
 
 These are uncapped native, offscreen results on the named GPU. They demonstrate substantial room above the 60 FPS target on this machine. They are not a measurement of every mid-range desktop, a visible window's compositor latency, or Chromium's software SwiftShader renderer. Browser layout and interaction checks are separate.
