@@ -1,0 +1,6 @@
+{
+  "ranger": {"id":"ranger","name":"Ranger","hp":8,"attack":3,"defence":2,"speed":5,"move":3,"passive":"Pathfinder","passive_description":"Forest costs 1 movement point.","abilities":[{"id":"snare","timing":"Planning"}]},
+  "warlord": {"id":"warlord","name":"Warlord","hp":12,"attack":5,"defence":4,"speed":2,"move":3,"passive":"Martial Presence","passive_description":"+1 Attack while contesting an enemy-controlled Tower.","abilities":[{"id":"challenge","timing":"Reaction"},{"id":"forced_march","timing":"Action"}]},
+  "merchant": {"id":"merchant","name":"Merchant","hp":9,"attack":2,"defence":3,"speed":3,"move":3,"passive":"Networker","passive_description":"Connected controlled Settlements gain +1 Gold income.","abilities":[{"id":"bribe","timing":"Reaction"},{"id":"trade","timing":"Action"}]},
+  "cultist": {"id":"cultist","name":"Cultist","hp":9,"attack":3,"defence":2,"speed":3,"move":3,"passive":"Occult Sense","passive_description":"Hints at undiscovered Relics within three hexes.","abilities":[{"id":"prepared_hex","timing":"Planning"},{"id":"dark_bargain","timing":"Action"}]}
+}

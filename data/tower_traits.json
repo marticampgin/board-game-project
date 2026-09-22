@@ -1,0 +1,4 @@
+{
+  "watchtower":{"id":"watchtower","name":"Watchtower","tower_defence":0,"owner_defence":0,"vision_radius":3,"description":"Reveals location details within 3 hexes while controlled."},
+  "fortress":{"id":"fortress","name":"Fortress","tower_defence":1,"owner_defence":1,"vision_radius":0,"description":"+1 tower Defence and +1 additional Defence to its defending controller."}
+}
