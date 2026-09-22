@@ -76,7 +76,7 @@ func _test_serialization_and_rejection() -> void:
 	var loaded: RefCounted = State.from_dict(JSON.parse_string(game.state.to_json()))
 	_check(loaded != null and loaded.checksum() == game.checksum(), "JSON save round trip preserves checksum")
 	_check(State.canonical_json({"b": 2, "a": 1}) == State.canonical_json({"a": 1.0, "b": 2.0}), "Canonical JSON ignores dictionary order and JSON integer conversion")
-	for bad_field: String in ["schema", "content", "class", "trait", "rng", "phase", "hero", "object"]:
+	for bad_field: String in ["schema", "content", "class", "trait", "rng", "phase", "hero", "object", "terrain", "location", "roads", "ownership", "events"]:
 		var bad: Dictionary = snapshot.duplicate(true)
 		match bad_field:
 			"schema": bad.schema_version = 9000
@@ -87,6 +87,11 @@ func _test_serialization_and_rejection() -> void:
 			"phase": bad.phase = "unknown"
 			"hero": bad.heroes.p1.hex = "999,999"
 			"object": bad.extra = RefCounted.new()
+			"terrain": bad.map.hexes[bad.heroes.p1.hex].terrain = "lava_unknown"
+			"location": bad.map.locations.minor_1.erase("discovered_by")
+			"roads": bad.map.roads.append(["999,999", "0,0"])
+			"ownership": bad.heroes.p1.controlled_locations.append("minor_1")
+			"events": bad.events[0].sequence = -1
 		_check(State.from_dict(bad) == null, "Reject corrupt snapshot: " + bad_field)
 	_reject_unchanged(game, {}, "INVALID_COMMAND")
 	_reject_unchanged(game, {"type": "cheat"}, "UNKNOWN_COMMAND")
@@ -228,6 +233,23 @@ func _test_contested_capture() -> void:
 		if event.type == "TowerCaptureResolved":
 			calculation = event.data.success and event.data.total == event.data.attack + event.data.martial_presence + event.data.die
 	_check(calculation, "Contested capture emits reproducible complete calculation")
+	# Failed capture still spends the scheduled action, with the owner unchanged.
+	player_id = game.current_actor()
+	var previous_actor: String = player_id
+	var another_tower: Dictionary = game.state.data.map.locations.minor_2
+	if another_tower.id == tower.id:
+		another_tower = game.state.data.map.locations.minor_3
+	another_tower.owner_id = owner
+	game.state.data.heroes[owner].controlled_locations.append(another_tower.id)
+	game.state.data.heroes[player_id].hex = another_tower.hex
+	game.state.data.heroes[player_id].attack = 0
+	another_tower.level = 3
+	another_tower.trait = "fortress"
+	if not another_tower.discovered_by.has(player_id): another_tower.discovered_by.append(player_id)
+	# Avoid using the owner itself as this fixture's attacker.
+	if player_id != owner:
+		result = _accept(game, {"type": "capture", "player_id": player_id})
+		_check(another_tower.owner_id == owner and game.current_actor() != previous_actor, "Failed capture preserves owner and consumes one action")
 
 func _test_replay_and_save_continuation() -> void:
 	var first: RefCounted = Rules.new(444)

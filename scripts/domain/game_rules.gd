@@ -267,7 +267,8 @@ func _move(player_id: String, target: String) -> void:
 	var origin: String = hero.hex
 	hero.hex = target
 	_emit("HeroMoved", player_id, {"from": origin, "to": target, "path": route.path, "cost": route.cost, "road_only": route.road_only})
-	_discover(player_id)
+	for traversed: String in route.path:
+		_discover(player_id, traversed)
 
 func _hero_location(player_id: String) -> Dictionary:
 	var hex_id: String = state.data.heroes[player_id].hex
@@ -297,9 +298,9 @@ func _capture(player_id: String) -> void:
 	_emit("LocationCaptured", player_id, {"location_id": location.id, "kind": location.kind, "previous_owner": previous_owner, "owner_id": player_id})
 	_discover(player_id)
 
-func _discover(player_id: String) -> void:
+func _discover(player_id: String, from_hex: String = "") -> void:
 	var hero: Dictionary = state.data.heroes[player_id]
-	var origins: Array = [{"hex": hero.hex, "radius": int(definitions.rules.discovery_radius)}]
+	var origins: Array = [{"hex": hero.hex if from_hex.is_empty() else from_hex, "radius": int(definitions.rules.discovery_radius)}]
 	for location_id: String in hero.controlled_locations:
 		var controlled: Dictionary = state.data.map.locations[location_id]
 		var tower_trait: Dictionary = definitions.tower_traits.get(controlled.trait, {})
