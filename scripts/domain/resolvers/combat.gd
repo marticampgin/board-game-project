@@ -13,9 +13,22 @@ static func stance_definitions() -> Dictionary:
 
 static func evaluate(attacker: Dictionary, defender: Dictionary, attacker_stance: String, defender_stance: String, attacker_die: int, defender_die: int, modifiers: Dictionary = {}) -> Dictionary:
 	var table := stance_definitions()
-	assert(attacker_stance == "none" or table.has(attacker_stance), "Unknown attacker stance")
-	assert(defender_stance == "none" or table.has(defender_stance), "Unknown defender stance")
-	assert(attacker_die >= 1 and attacker_die <= 6 and defender_die >= 1 and defender_die <= 6, "Combat dice must be d6 values")
+	if (attacker_stance != "none" and not table.has(attacker_stance)) or (defender_stance != "none" and not table.has(defender_stance)):
+		return _invalid("INVALID_STANCE", "Both stances must identify a known stance or fixed monster behavior.")
+	if attacker_die < 1 or attacker_die > 6 or defender_die < 1 or defender_die > 6:
+		return _invalid("INVALID_DIE", "Combat dice must be integers from one to six.")
+	if not _integer(attacker.get("attack")) or not _integer(defender.get("defence")) or attacker.attack < 0 or defender.defence < 0:
+		return _invalid("INVALID_STAT", "Combatants require nonnegative integer Attack and Defence stats.")
+	for name in ["attacker_modifier", "defender_modifier", "attacker_die_modifier", "defender_die_modifier"]:
+		if not _integer(modifiers.get(name, 0)):
+			return _invalid("INVALID_MODIFIER", "Combat modifiers must be finite integers.")
+	for name in ["attacker_modifiers", "defender_modifiers"]:
+		var parts: Variant = modifiers.get(name, {})
+		if not parts is Dictionary:
+			return _invalid("INVALID_MODIFIER", "Named combat modifiers must be a dictionary.")
+		for label: Variant in parts:
+			if not label is String or not _integer(parts[label]):
+				return _invalid("INVALID_MODIFIER", "Named combat modifiers require string labels and integer values.")
 	var attack_definition: Dictionary = table.get(attacker_stance, {})
 	var defend_definition: Dictionary = table.get(defender_stance, {})
 	var attack_stance_bonus := _stance_modifier(attack_definition, defender_stance)
@@ -62,6 +75,7 @@ static func evaluate(attacker: Dictionary, defender: Dictionary, attacker_stance
 		defend_reduction = mini(int(defend_definition.get("damage_reduction", 0)), maxi(0, defend_damage - int(defend_definition.get("minimum_damage", 1))))
 		defend_damage -= defend_reduction
 	return {
+		"is_valid": true,
 		"attacker_total": attack_total, "defender_total": defend_total, "margin": margin,
 		"success": success, "winner": "attacker" if success else "defender", "outcome_band": band,
 		"attacker_damage": attack_damage, "defender_damage": defend_damage,
@@ -85,3 +99,9 @@ static func evaluate(attacker: Dictionary, defender: Dictionary, attacker_stance
 
 static func _stance_modifier(definition: Dictionary, opposing_stance: String) -> int:
 	return int(definition.get("versus_modifiers", {}).get(opposing_stance, definition.get("base_modifier", 0)))
+
+static func _integer(value: Variant) -> bool:
+	return (value is int or value is float) and is_finite(float(value)) and float(value) == floor(float(value))
+
+static func _invalid(code: String, message: String) -> Dictionary:
+	return {"is_valid": false, "reason_code": code, "message": message}

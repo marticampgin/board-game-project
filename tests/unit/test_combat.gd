@@ -5,10 +5,12 @@ var errors: Array[String] = []
 func run() -> Array[String]:
 	errors.clear()
 	_test_stance_matrix()
+	_test_stance_die_boundaries()
 	_test_margin_bands()
 	_test_damage_effects()
 	_test_modifiers_and_purity()
 	_test_monsters()
+	_test_malformed_inputs()
 	return errors
 
 func _check(condition: bool, message: String) -> void:
@@ -37,6 +39,27 @@ func _test_margin_bands() -> void:
 		var result := Combat.evaluate({"attack": 10 + item[0]}, {"defence": 10}, "none", "none", 3, 3)
 		_check(result.margin == item[0], "Margin arithmetic")
 		_check([result.attacker_damage, result.defender_damage, result.displace, result.drop_gold] == item.slice(1), "Outcome band at margin %d" % item[0])
+
+func _test_stance_die_boundaries() -> void:
+	var stances := ["assault", "guard", "counter", "trick"]
+	var expected := {"assault": [2, 2, 2, 2], "guard": [1, 1, 1, 1], "counter": [3, -1, -1, -1], "trick": [0, 2, 2, 0]}
+	var attacker := {"attack": 4, "hp": 12, "fate": 3}
+	var defender := {"defence": 2, "hp": 8, "fate": 3}
+	var modifiers := {"attacker_modifier": -1, "defender_modifier": 2, "attacker_modifiers": {"recovering": -1}, "defender_modifiers": {"forest": 1, "controlled_tower": 1}}
+	var original := JSON.stringify([attacker, defender, modifiers])
+	for a in range(4):
+		for d in range(4):
+			for attack_die in [1, 6]:
+				for defend_die in [1, 6]:
+					var result := Combat.evaluate(attacker, defender, stances[a], stances[d], attack_die, defend_die, modifiers)
+					var expected_attack: int = 3 + expected[stances[a]][d] + attack_die
+					var expected_defence: int = 4 + expected[stances[d]][a] + defend_die
+					_check(result.is_valid and result.attacker_total == expected_attack and result.defender_total == expected_defence, "Bounded-d6 formula for %s/%s dice %d/%d" % [stances[a], stances[d], attack_die, defend_die])
+					_check(result.margin == expected_attack - expected_defence, "Opposed total subtraction at both die bounds")
+					_check(result.attacker_damage >= 0 and result.defender_damage >= 0, "Damage never becomes negative")
+					_check(JSON.stringify([attacker, defender, modifiers]) == original, "No stance or die pairing mutates inputs or spends Fate")
+					result.attacker_modifiers.recovering = 200
+					_check(modifiers.attacker_modifiers.recovering == -1, "Calculation result does not alias named modifiers")
 
 func _test_damage_effects() -> void:
 	var result := Combat.evaluate({"attack": 3}, {"defence": 3}, "none", "guard", 3, 3)
@@ -83,3 +106,27 @@ func _test_monsters() -> void:
 		var result := Combat.evaluate({"attack": 3}, monster, "guard", "none", 3, 3)
 		_check(result.defender_stance_modifier == 0 and result.defender_total == monster.defence + 3, "Monsters share opposed combat arithmetic")
 	_check(profiles.wolf_pack.reward.gold == 2 and profiles.stone_guardian.reward.power == 2 and profiles.relic_wraith.reward.relics == 1, "Distinct Gold, Power and Relic rewards")
+
+func _test_malformed_inputs() -> void:
+	var cases := [
+		{"attacker": {"attack": 3}, "defender": {"defence": 2}, "a": "unknown", "d": "guard", "ad": 3, "dd": 3, "mods": {}, "code": "INVALID_STANCE"},
+		{"attacker": {"attack": 3}, "defender": {"defence": 2}, "a": "guard", "d": "unknown", "ad": 3, "dd": 3, "mods": {}, "code": "INVALID_STANCE"},
+		{"attacker": {"attack": 3}, "defender": {"defence": 2}, "a": "guard", "d": "guard", "ad": 0, "dd": 3, "mods": {}, "code": "INVALID_DIE"},
+		{"attacker": {"attack": 3}, "defender": {"defence": 2}, "a": "guard", "d": "guard", "ad": 3, "dd": 7, "mods": {}, "code": "INVALID_DIE"},
+		{"attacker": {}, "defender": {"defence": 2}, "a": "guard", "d": "guard", "ad": 3, "dd": 3, "mods": {}, "code": "INVALID_STAT"},
+		{"attacker": {"attack": "three"}, "defender": {"defence": 2}, "a": "guard", "d": "guard", "ad": 3, "dd": 3, "mods": {}, "code": "INVALID_STAT"},
+		{"attacker": {"attack": 3}, "defender": {"defence": -2}, "a": "guard", "d": "guard", "ad": 3, "dd": 3, "mods": {}, "code": "INVALID_STAT"},
+		{"attacker": {"attack": 3}, "defender": {"defence": 2.5}, "a": "guard", "d": "guard", "ad": 3, "dd": 3, "mods": {}, "code": "INVALID_STAT"},
+		{"attacker": {"attack": 3}, "defender": {"defence": 2}, "a": "guard", "d": "guard", "ad": 3, "dd": 3, "mods": {"attacker_modifier": "bonus"}, "code": "INVALID_MODIFIER"},
+		{"attacker": {"attack": 3}, "defender": {"defence": 2}, "a": "guard", "d": "guard", "ad": 3, "dd": 3, "mods": {"defender_die_modifier": 0.5}, "code": "INVALID_MODIFIER"},
+		{"attacker": {"attack": 3}, "defender": {"defence": 2}, "a": "guard", "d": "guard", "ad": 3, "dd": 3, "mods": {"attacker_modifiers": []}, "code": "INVALID_MODIFIER"},
+		{"attacker": {"attack": 3}, "defender": {"defence": 2}, "a": "guard", "d": "guard", "ad": 3, "dd": 3, "mods": {"defender_modifiers": {"forest": "one"}}, "code": "INVALID_MODIFIER"},
+	]
+	for item in cases:
+		var original := JSON.stringify(item)
+		var result := Combat.evaluate(item.attacker, item.defender, item.a, item.d, item.ad, item.dd, item.mods)
+		_check(not result.is_valid and result.reason_code == item.code, "Malformed combat input returns " + str(item.code))
+		_check(not result.has("margin") and not result.has("defender_damage"), "Rejected combat input produces no actionable result")
+		_check(JSON.stringify(item) == original, "Malformed combat input remains unchanged")
+	_check(not Combat.evaluate({"attack": NAN}, {"defence": 2}, "none", "none", 3, 3).is_valid, "Nonfinite stats are rejected")
+	_check(not Combat.evaluate({"attack": 3}, {"defence": 2}, "none", "none", 3, 3, {"attacker_modifier": INF}).is_valid, "Nonfinite modifiers are rejected")
