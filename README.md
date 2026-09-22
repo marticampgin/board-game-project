@@ -1,8 +1,8 @@
 # Shattered Realm
 
-A deterministic four-seat local board-game prototype built from [the master specification](shattered_realm_codex_master_spec.md). The current playable scope is **Milestones 0 and 1**: seeded hex board, planning, initiative, two action cycles, movement, neutral Minor Tower capture, income, discovery, and inspectable command/event history.
+A deterministic four-seat local board-game prototype built from [the master specification](shattered_realm_codex_master_spec.md). The current playable scope is **Milestones 0–2**: seeded hex board, simultaneous planning, initiative, two action cycles, movement, tower capture and upgrades, hero/monster combat, Fate, class timing, recovery, and inspectable command/event history.
 
-Combat, Ancient Tower commitments, class actions, upgrades, exploration, victory routes, and online multiplayer remain later milestones. The current slice can play successive rounds; it does not declare a match winner.
+Exploration, settlement trade/economy, world events, victory routes, the remaining class content, and online multiplayer remain later milestones. The current slice can play successive rounds; it does not declare a match winner.
 
 ## Run
 
@@ -19,7 +19,13 @@ The tools find `Godot_v4.7.2-stable_win64_console.exe`, `godot`, or `godot4` on 
 $env:GODOT_BIN = 'C:\path\to\Godot_v4.7.2-stable_win64_console.exe'
 ```
 
-The game uses primitive 3D terrain, roads, landmarks and heroes; no art downloads or Godot addons are needed. Compatibility rendering supports desktop and the browser smoke build. Enter a seed, advance World into Planning, ready all four seats, reveal initiative, and move/capture/pass through both cycles. Complete Bonus and Resolution to receive income and start the next round. The local development interface controls every seat.
+An optional local Windows build is available at `build/windows/ShatteredRealm.exe`; double-click it to play without opening the editor. Generated builds are ignored by Git. Rebuild it with the matching export templates installed:
+
+```powershell
+Godot_v4.7.2-stable_win64_console.exe --headless --path . --export-debug "Windows Desktop" build/windows/ShatteredRealm.exe
+```
+
+The game uses primitive 3D terrain, roads, landmarks and heroes; no art downloads or Godot addons are needed. Compatibility rendering supports desktop and the browser smoke build. Enter a seed, advance World into Planning, submit class preparations, ready all four seats, reveal initiative, and act through both cycles. Combat opens participant stance and Fate windows; eligible class reactions prompt their owner. Complete Bonus and Resolution to receive income and start the next round. The local development interface controls every seat.
 
 ## Exercise the actual rules from a terminal
 
@@ -30,9 +36,11 @@ npm run cli -- state
 npm run cli -- replay
 npm run cli -- logs --limit 10
 npm run cli -- validate-map --seed 1 --count 100
+npm run cli -- simulate --rounds 20
+npm run cli -- logs --event CombatResolved --limit 5
 ```
 
-Every implemented action has an alias: `advance`, `plan`, `ready`, `move`, `capture`, and `pass`. `legal p1` reports authoritative targets and movement paths. `command --file command.json` accepts any shared command object, including version/phase guards and command IDs. See `npm run cli -- help` and [testing documentation](docs/TESTING.md) for examples. CLI saves default to `.realm/state.json`; use `--state FILE` for independent matches.
+Every implemented action and decision has a CLI command: `advance`, `plan`, `ready`, `move`, `capture`, `attack`, `stance`, `fate`, `decline-fate`, `reaction`, `displace`, `special`, `rest`, `forced-march`, `upgrade`, and `pass`. `legal p1` reports authoritative targets and choices. `command --file command.json` accepts any shared command object, including version/phase guards and command IDs. `bot-step` submits one deterministic bot choice. See `npm run cli -- help` and [testing documentation](docs/TESTING.md) for examples. CLI saves default to `.realm/state.json`; use `--state FILE` for independent matches.
 
 UI, CLI, scripted simulation, tests, and replay call the same GDScript rules. No game rules are duplicated in JavaScript.
 
@@ -47,7 +55,7 @@ npm run test:e2e
 
 The browser build needs the matching Godot export templates. Install Playwright's browser once with `npx playwright install chromium`. Test artifacts and generated builds are ignored by Git.
 
-Headless checks cover 100 map seeds, weighted movement, all seven phase types, three complete rounds, every hero moving, tower income, deterministic replay, JSON saves and RNG continuation, and rejected-command purity. CLI tests verify atomic persistence, structured logs, readable queries, process status, and the test runner's intentional failure path. Browser tests exercise the actual exported Godot game.
+Headless checks cover 100 map seeds, weighted movement, all seven phase types, three-round movement/income acceptance, all sixteen stance pairings, combat/Fate/reaction timing, recovery, Ancient Tower commitments, and twenty rounds with four deterministic bots. Replay and JSON continuation compare state, events and RNG, including pending decisions. CLI tests verify persistence, action aliases, structured logs, process status, and the test runner's intentional failure path. Browser tests exercise the actual exported Godot game.
 
 ## Project guide
 

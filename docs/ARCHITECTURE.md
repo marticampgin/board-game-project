@@ -25,6 +25,9 @@ flowchart LR
 - `domain/hex/hex.gd`: pointy-top axial/cube geometry, deterministic coordinate queries and world projection.
 - `domain/generation/`: structured seeded generation and fairness/connectivity validation, including bounded retries and diagnostics.
 - `domain/resolvers/movement.gd`: weighted movement with occupied-hex blocking, terminal swamps, Ranger Forest cost, and separate all-road and mixed-path states.
+- `domain/resolvers/combat.gd`: pure, data-driven stance and damage arithmetic; no resource mutation or RNG draws.
+- `domain/resolvers/battle_flow.gd` and `class_flow.gd`: explicit combat, Fate, displacement, Bribe and Challenge windows; prepared class effects and movement interruption.
+- `domain/bots/simple_bot.gd`: deterministic policy over legal actions, public stats and discovered locations. It never inspects opponents' sealed stances or plans and does not draw gameplay RNG.
 - `domain/definitions/`: validated class, rule, terrain, location and tower-trait data.
 - `domain/state/`: portable state, schema/definition validation and canonical checksums.
 - `domain/commands/` and `domain/events/`: stable intent/result/event foundations.
@@ -36,9 +39,9 @@ Gameplay RNG streams are derived from the master seed and isolated from one anot
 
 The native presentation creates board meshes and Controls from snapshots, submits commands, then animates emitted changes. Logic commits before animation, so interrupting a tween cannot change the result.
 
-`tools/realm.mjs` handles argument parsing, process invocation, locks and filesystem persistence. It writes JSON request/response files and launches `tools/game_cli.gd` with a literal argument array, avoiding shell interpretation of player input. That GDScript adapter uses the same `GameRules`, legal queries and movement resolver. The demonstration bot chooses among legal targets and stops after a configured round count; it does not invent a winner.
+`tools/realm.mjs` handles argument parsing, process invocation, locks and filesystem persistence. It writes JSON request/response files and launches `tools/game_cli.gd` with a literal argument array, avoiding shell interpretation of player input. That GDScript adapter uses the same `GameRules`, legal queries and `SimpleBot.choose(rules)` policy as other clients. The bot handles required decisions before scheduled actions and stops after a configured round count; it does not invent a winner. Simulations bound commands per round and surface invalid combat calculations immediately.
 
-`ActionLogger.execute` wraps the command boundary for native UI and CLI. Each accepted or rejected attempt records the complete command, source, reason, before/after checksums and versions, phase, RNG snapshots, and emitted events. UTC timestamps and durations exist only in diagnostics; they are excluded from authoritative state and replay hashes. Logs can render as JSONL or readable event lines. The current local prototype log includes all four seats' development state and is not a future public multiplayer payload.
+`ActionLogger.execute` wraps the command boundary for native UI and CLI. Each accepted or rejected attempt records the complete command, source, reason, before/after checksums and versions, phase, pending-decision stage, RNG snapshots, and emitted events. UTC timestamps and durations exist only in diagnostics; they are excluded from authoritative state and replay hashes. Logs can render as JSONL or readable event lines. The current local prototype log includes all four seats' development state and is not a future public multiplayer payload.
 
 ## Persistence and replay
 

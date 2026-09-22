@@ -103,6 +103,7 @@ function summary(response) {
 function formatLog(entry) {
   const command = entry.command ?? {};
   const lines = [`${entry.timestamp_utc} ${entry.accepted ? 'ACCEPT' : 'REJECT'} r${entry.round_before} ${entry.phase_before} v${entry.version_before}→${entry.version_after} ${command.type} ${command.player_id ?? ''} ${command.target ?? ''} [${entry.reason_code}]`, `  hash ${entry.checksum_before} → ${entry.checksum_after}`];
+  if ((entry.decision_before ?? 'action') !== 'action' || (entry.decision_after ?? 'action') !== 'action') lines.push(`  decision ${entry.decision_before} → ${entry.decision_after}`);
   if (!entry.accepted) lines.push(`  ${entry.message}`);
   for (const event of entry.events ?? []) lines.push(`  #${event.sequence} ${event.type} ${JSON.stringify(event.data)}`);
   return lines.join('\n');

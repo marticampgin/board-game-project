@@ -98,6 +98,7 @@ func _simulate(rules: RefCounted, rounds: int) -> Dictionary:
 	var maximum: int = rounds * 120 + 120
 	var action_counts: Dictionary = {}
 	var event_counts: Dictionary = {}
+	var commands_per_round: Dictionary = {}
 	while int(rules.snapshot()["round_number"]) < end_round and attempts < maximum:
 		var state: Dictionary = rules.snapshot()
 		var command: Dictionary = SimpleBot.choose(rules)
@@ -106,12 +107,18 @@ func _simulate(rules: RefCounted, rounds: int) -> Dictionary:
 		command["expected_version"] = state["state_version"]
 		var result: Dictionary = logger.execute(rules, command, "bot")
 		attempts += 1
+		var round_number: int = int(state["round_number"])
+		commands_per_round[round_number] = int(commands_per_round.get(round_number, 0)) + 1
+		if int(commands_per_round[round_number]) > 120:
+			return {"ok": false, "error": "Simulation exceeded 120 commands in one round.", "attempts": attempts, "round": round_number, "command": command}
 		if not result.get("is_valid", false):
 			return {"ok": false, "error": "Bot command rejected.", "command": command, "result": result, "attempts": attempts}
 		var action: String = str(command["type"])
 		action_counts[action] = int(action_counts.get(action, 0)) + 1
 		for event: Dictionary in result.get("events", []):
 			var kind: String = str(event["type"])
+			if kind == "CombatCalculationUpdated" and not event["data"].get("is_valid", true):
+				return {"ok": false, "error": "Combat calculation failed.", "details": event["data"], "attempts": attempts}
 			event_counts[kind] = int(event_counts.get(kind, 0)) + 1
 	var completed: bool = int(rules.snapshot()["round_number"]) == end_round
 	return {"ok": completed, "completed_rounds": rounds if completed else int(rules.snapshot()["round_number"]) - end_round + rounds, "attempts": attempts, "action_counts": action_counts, "event_counts": event_counts, "stop_reason": "configured_round_limit" if completed else "command_limit_exceeded"}

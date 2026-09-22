@@ -6,6 +6,7 @@
   "description": "Godot 4.7.2 deterministic board-game prototype and development tools",
   "engines": { "node": ">=20" },
   "scripts": {
+    "postinstall": "node tools/setup.mjs",
     "start": "node tools/godot.mjs play",
     "check": "node tools/godot.mjs check",
     "test": "npm run test:headless && npm run test:cli",

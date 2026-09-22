@@ -27,6 +27,8 @@ func execute(rules: RefCounted, command: Dictionary, source: String = "local") -
 		"round_before": before.get("round_number", 0),
 		"phase_before": before.get("phase", ""),
 		"phase_after": after.get("phase", ""),
+		"decision_before": _decision_label(before),
+		"decision_after": _decision_label(after),
 		"version_before": before.get("state_version", 0),
 		"version_after": after.get("state_version", 0),
 		"checksum_before": before_hash,
@@ -63,11 +65,22 @@ static func format_entry(entry: Dictionary) -> String:
 		],
 		"  hash %s -> %s" % [entry.get("checksum_before", ""), entry.get("checksum_after", "")]
 	]
+	if entry.get("decision_before", "action") != "action" or entry.get("decision_after", "action") != "action":
+		lines.append("  decision %s -> %s" % [entry.get("decision_before", "action"), entry.get("decision_after", "action")])
 	if not entry.get("accepted", false):
 		lines.append("  " + str(entry.get("message", "")))
 	for event: Dictionary in entry.get("events", []):
 		lines.append("  #%s %s %s" % [event.get("sequence", "?"), event.get("type", "?"), JSON.stringify(event.get("data", {}))])
 	return "\n".join(lines)
+
+static func _decision_label(snapshot: Dictionary) -> String:
+	var reaction: Dictionary = snapshot.get("pending_reaction", {})
+	if not reaction.is_empty():
+		return "reaction:" + str(reaction.get("kind", ""))
+	var combat: Dictionary = snapshot.get("pending_combat", {})
+	if not combat.is_empty():
+		return "combat:" + str(combat.get("stage", ""))
+	return "action"
 
 func _append(entry: Dictionary) -> void:
 	if path.is_empty():

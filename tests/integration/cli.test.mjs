@@ -62,8 +62,40 @@ test('CLI persists shared rules, records rejected attempts, simulates and verifi
 });
 
 test('headless runner deliberately returns exit 1 when an assertion fails', { timeout: 180000 }, () => {
-  const run = spawnSync(findGodot(), ['--headless', '--path', projectRoot, '--script', 'res://tests/run_tests.gd', '--', '--self-test-failure'], { cwd: projectRoot, encoding: 'utf8', windowsHide: true, timeout: 170000 });
+  const run = spawnSync(findGodot(), ['--headless', '--path', projectRoot, '--script', 'res://tests/run_tests.gd', '--', '--suite', 'combat', '--self-test-failure'], { cwd: projectRoot, encoding: 'utf8', windowsHide: true, timeout: 170000 });
   assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
   assert.match(run.stderr, /Intentional runner failure/);
   assert.doesNotMatch(run.stderr, /SCRIPT ERROR|Parse Error/);
+});
+
+test('conflict action aliases submit their documented command payloads', { timeout: 90000 }, () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'realm-cli-test-'));
+  const state = path.join(directory, 'aliases.json');
+  try {
+    invoke(state, ['new', '--seed', '7']);
+    const commands = [
+      { args: ['attack', 'p1', 'p2'], command: { type: 'attack', player_id: 'p1', target_id: 'p2' } },
+      { args: ['stance', 'p1', 'assault'], command: { type: 'choose_stance', player_id: 'p1', stance: 'assault' } },
+      { args: ['fate', 'p1'], command: { type: 'spend_fate', player_id: 'p1' } },
+      { args: ['decline-fate', 'p1'], command: { type: 'decline_fate', player_id: 'p1' } },
+      { args: ['displace', 'p1', '0,1'], command: { type: 'displace', player_id: 'p1', target: '0,1' } },
+      { args: ['reaction', 'p3', 'accept'], command: { type: 'resolve_reaction', player_id: 'p3', choice: 'accept' } },
+      { args: ['rest', 'p1'], command: { type: 'special', player_id: 'p1', special_id: 'rest' } },
+      { args: ['forced-march', 'p2', '0,1'], command: { type: 'special', player_id: 'p2', special_id: 'forced_march', target: '0,1' } },
+      { args: ['special', 'p2', 'forced_march', '0,1'], command: { type: 'special', player_id: 'p2', special_id: 'forced_march', target: '0,1' } },
+      { args: ['upgrade', 'p1'], command: { type: 'upgrade', player_id: 'p1' } },
+    ];
+    for (const { args } of commands) {
+      const response = invoke(state, args, 2);
+      assert.notEqual(response.result.reason_code, 'UNKNOWN_COMMAND');
+      assert.equal(response.snapshot.state_version, 0, 'A command outside its decision window must not consume a version');
+    }
+    const entries = invoke(state, ['logs', '--limit', '100']);
+    assert.deepEqual(entries.map(entry => entry.command), commands.map(example => example.command));
+    assert.ok(entries.every(entry => !entry.accepted && entry.checksum_before === entry.checksum_after));
+  } finally {
+    assert.equal(path.dirname(path.resolve(directory)), path.resolve(tmpdir()));
+    assert.ok(path.basename(directory).startsWith('realm-cli-test-'));
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
