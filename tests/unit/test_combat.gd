@@ -95,6 +95,11 @@ func _test_modifiers_and_purity() -> void:
 	_check(result.attacker_modifiers == {"recovering": -1} and result.defender_modifiers == {"forest": 1, "tower": 1}, "Calculation retains named modifier breakdown")
 	result = Combat.evaluate(attacker, defender, "none", "none", 6, 1, {"attacker_die_modifier": -1})
 	_check(result.attacker_die == 5 and result.attacker_raw_die == 6, "Prepared Hex applies to final rerolled die")
+	var named_parts: Dictionary = {}
+	named_parts.forest = 1
+	named_parts.controlled_tower = 1
+	result = Combat.evaluate(attacker, defender, "none", "none", 3, 3, {"defender_modifier": 2, "defender_modifiers": named_parts})
+	_check(result.is_valid and result.defender_total == 7 and result.defender_modifiers.forest == 1, "Godot dot-assigned StringName modifier keys remain valid")
 
 func _test_monsters() -> void:
 	var profiles: Dictionary = JSON.parse_string(FileAccess.get_file_as_string("res://data/monsters.json"))

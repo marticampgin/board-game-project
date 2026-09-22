@@ -27,7 +27,7 @@ static func evaluate(attacker: Dictionary, defender: Dictionary, attacker_stance
 		if not parts is Dictionary:
 			return _invalid("INVALID_MODIFIER", "Named combat modifiers must be a dictionary.")
 		for label: Variant in parts:
-			if not label is String or not _integer(parts[label]):
+			if not (label is String or label is StringName) or not _integer(parts[label]):
 				return _invalid("INVALID_MODIFIER", "Named combat modifiers require string labels and integer values.")
 	var attack_definition: Dictionary = table.get(attacker_stance, {})
 	var defend_definition: Dictionary = table.get(defender_stance, {})
