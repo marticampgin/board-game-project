@@ -6,6 +6,8 @@ const Board = preload("res://scripts/presentation/board_view.gd")
 const ActionLog = preload("res://scripts/services/action_logger.gd")
 const Hex = preload("res://scripts/domain/hex/hex.gd")
 const Bot = preload("res://scripts/domain/bots/simple_bot.gd")
+const Saves = preload("res://scripts/services/snapshot_store.gd")
+const Preferences = preload("res://scripts/services/preferences.gd")
 const PHASES: Array[String] = ["world", "planning", "initiative", "cycle_1", "cycle_2", "bonus", "resolution"]
 const INK := Color("eee8d8")
 const MUTED := Color("91aaa9")
@@ -22,7 +24,7 @@ var instruction: Label
 var phase_steps: HBoxContainer
 var initiative: HBoxContainer
 var cards: VBoxContainer
-var actions: HBoxContainer
+var actions: HFlowContainer
 var selected_panel: RichTextLabel
 var log_text: RichTextLabel
 var debug_text: RichTextLabel
@@ -50,11 +52,34 @@ var planning_push: CheckBox
 var planning_snare: OptionButton
 var planning_hex: OptionButton
 var planning_seat: String = ""
+var planning_purchase: OptionButton
+var mode_select: OptionButton
+var seat_select: OptionButton
+var local_mode: String = "sandbox"
+var human_seat: String = "p1"
+var bot_elapsed: float = 0.0
+var session_label: Label
+var saves := Saves.new()
+var load_dialog: AcceptDialog
+var threat_label: Label
+var pending_handoff_key: String = ""
+var victory_panel: PanelContainer
+var victory_text: Label
+var cinematic: PanelContainer
+var cinematic_text: Label
+var cinematic_seconds: float = 0.0
+var preferences: Node
+var settings_dialog: AcceptDialog
+const MANUAL_SAVE := "user://saves/manual.json"
+const AUTO_SAVE := "user://saves/autosave.json"
 
 func _ready() -> void:
 	logger = ActionLog.new("user://logs/actions.jsonl")
+	preferences = Preferences.new()
+	add_child(preferences)
 	_build_theme()
 	_build_ui()
+	_apply_preferences()
 	_new_game(20260922)
 	_setup_bridge()
 	get_viewport().size_changed.connect(_publish_bridge)
@@ -112,6 +137,7 @@ func _button(id: String, text_value: String, callable: Callable) -> Button:
 	var result := Button.new()
 	result.text = text_value
 	result.pressed.connect(callable)
+	result.pressed.connect(func() -> void: preferences.click())
 	result.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	buttons[id] = result
 	return result
@@ -158,6 +184,7 @@ func _build_ui() -> void:
 	header.add_child(_button("regenerate", "Regenerate", _regenerate))
 	header.add_child(_button("copy_seed", "Copy seed", func() -> void: DisplayServer.clipboard_set(seed_edit.text)))
 	header.add_child(_button("rules", "Rules", func() -> void: rules_dialog.popup_centered(Vector2i(650, 470))))
+	header.add_child(_button("settings", "Settings", func() -> void: settings_dialog.popup_centered()))
 	header.add_child(_button("debug", "Debug  F3", _toggle_debug))
 	var phase_panel := _panel(Color("1d333a"), 10)
 	layout.add_child(phase_panel)
@@ -173,6 +200,9 @@ func _build_ui() -> void:
 	phase_row.add_child(phase_steps)
 	initiative = HBoxContainer.new()
 	phase_stack.add_child(initiative)
+	threat_label = _label("", 12, GOLD)
+	threat_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	phase_stack.add_child(threat_label)
 	var body := HBoxContainer.new()
 	body.add_theme_constant_override("separation", 10)
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -184,10 +214,15 @@ func _build_ui() -> void:
 	cards = VBoxContainer.new()
 	cards.add_theme_constant_override("separation", 6)
 	left.add_child(cards)
-	var local_note := _label("LOCAL · ALL FOUR SEATS", 11, MUTED)
-	local_note.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	local_note.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
-	left.add_child(local_note)
+	session_label = _label("LOCAL · ALL FOUR SEATS", 11, MUTED)
+	session_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	session_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	left.add_child(session_label)
+	var save_row := HBoxContainer.new()
+	left.add_child(save_row)
+	save_row.add_child(_button("save_game", "Save", func() -> void: _save_game(MANUAL_SAVE)))
+	save_row.add_child(_button("load_game", "Load", _open_load))
+	save_row.add_child(_button("menu", "Menu", func() -> void: welcome.show(); _publish_bridge()))
 	var center := VBoxContainer.new()
 	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body.add_child(center)
@@ -257,7 +292,7 @@ func _build_ui() -> void:
 	footer.add_child(footer_stack)
 	instruction = _label("", 16, GOLD)
 	footer_stack.add_child(instruction)
-	actions = HBoxContainer.new()
+	actions = HFlowContainer.new()
 	actions.add_theme_constant_override("separation", 8)
 	footer_stack.add_child(actions)
 	feedback = _label("Seeded rules · local four-seat play · no turn timers", 12, MUTED)
@@ -265,15 +300,25 @@ func _build_ui() -> void:
 	_build_debug()
 	_build_welcome()
 	_build_decision_ui()
+	_build_victory_ui()
+	_build_settings()
 	rules_dialog = AcceptDialog.new()
 	rules_dialog.title = "The rules of the realm"
 	rules_dialog.dialog_text = "Each round: World > Planning > Initiative > two Action Cycles > Bonus > Resolution. Every hero acts once in each cycle. Initiative is Speed + d3.\n\nMove: 3 MP; road-only paths allow 4. Forest costs 2 (Ranger: 1). Swamp ends movement. Occupied and impassable hexes block paths.\n\nMinor Towers capture in one action; Ancient Towers need Begin then Complete on your next action. Towers pay Power at Resolution. Upgrades cost 3/5 Gold.\n\nCombat: select an adjacent target, choose sealed stances, then reveal. Assault +2; Guard +1 and reduces damage; Counter +3 against Assault, otherwise -1; Trick costs 1 Fate and gains +2 against Guard/Counter. Ties defend. Attacker rerolls first, then defender. Each reroll costs 1 Fate.\n\nFate caps at 5 and grows by 1 each Resolution. Planning offers Initiative Push, Ranger Snare and Cultist Prepared Hex. Downed heroes recover at Sanctuary and retain scheduled actions.\n\nGreen rings: Move. Red rings: Attack. Camera: WASD pan, Q/E rotate, wheel zoom, F/Home focus. Victory routes and exploration arrive in Milestone 3."
 	add_child(rules_dialog)
 	pass_dialog = ConfirmationDialog.new()
-	pass_dialog.title = "Pass this action>"
+	pass_dialog.title = "Pass this action?"
 	pass_dialog.dialog_text = "This action will be lost. Your next action still follows initiative order."
 	pass_dialog.confirmed.connect(func() -> void: _command({"type": "pass", "player_id": rules.current_actor()}))
 	add_child(pass_dialog)
+	load_dialog = AcceptDialog.new()
+	load_dialog.title = "Continue a saved realm"
+	var load_choices := VBoxContainer.new()
+	load_choices.add_child(_label("Loading replaces the current table. Save first to retain it.", 14, MUTED))
+	load_choices.add_child(_button("load_manual", "Load manual save", func() -> void: _load_game(MANUAL_SAVE)))
+	load_choices.add_child(_button("load_auto", "Load round autosave", func() -> void: _load_game(AUTO_SAVE)))
+	load_dialog.add_child(load_choices)
+	add_child(load_dialog)
 
 func _build_debug() -> void:
 	debug_panel = _panel(Color("102128"), 16)
@@ -310,19 +355,33 @@ func _build_welcome() -> void:
 	welcome.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
 	welcome.offset_left = -265
 	welcome.offset_right = 265
-	welcome.offset_top = -140
-	welcome.offset_bottom = 140
+	welcome.offset_top = -225
+	welcome.offset_bottom = 225
 	add_child(welcome)
 	var stack := VBoxContainer.new()
 	stack.add_theme_constant_override("separation", 14)
 	welcome.add_child(stack)
 	stack.add_child(_label("YOUR TABLE AWAITS", 12, GOLD))
 	stack.add_child(_label("Four heroes. One shattered realm.", 23))
-	stack.add_child(_label("Ranger · Warlord · Merchant · Cultist\n\nA seeded world of towers, roads and contested ground.\nControl all four seats in this development prototype.", 15, MUTED))
+	stack.add_child(_label("Ranger · Warlord · Merchant · Cultist\n\nClaim Ancient Towers, build a trading dominion,\nor bring three Relics to the Worldspire.", 15, MUTED))
+	mode_select = OptionButton.new()
+	mode_select.add_item("Local sandbox · control all four heroes")
+	mode_select.add_item("Solo · one human and three bots")
+	mode_select.add_item("Hotseat · four humans with private handoffs")
+	stack.add_child(mode_select)
+	seat_select = OptionButton.new()
+	for value: String in ["P1 · Ranger", "P2 · Warlord", "P3 · Merchant", "P4 · Cultist"]: seat_select.add_item(value)
+	seat_select.tooltip_text = "Your hero in Solo mode. All heroes remain inspectable."
+	stack.add_child(seat_select)
 	stack.add_child(_button("start", "Enter the realm  >", func() -> void:
+		local_mode = ["sandbox", "solo", "hotseat"][mode_select.selected]
+		human_seat = "p%d" % (seat_select.selected + 1)
+		viewer = human_seat if local_mode == "solo" else "p1"
 		started = true
 		welcome.hide()
-		_command({"type": "advance"})))
+		if rules.state.data.phase == "world": _command({"type": "advance"})
+		else: _refresh()))
+	stack.add_child(_button("welcome_load", "Continue a saved game", _open_load))
 
 func _build_decision_ui() -> void:
 	handoff = Control.new()
@@ -348,7 +407,7 @@ func _build_decision_ui() -> void:
 	stack.add_child(handoff_label)
 	stack.add_child(_label("Pass control to this player.\nStances stay sealed until both players have chosen.", 15, MUTED))
 	stack.add_child(_button("handoff", "I am ready to choose", func() -> void:
-		decision_ack = _decision_key()
+		decision_ack = pending_handoff_key
 		handoff.hide()
 		_refresh()))
 	planning_dialog = ConfirmationDialog.new()
@@ -367,7 +426,127 @@ func _build_decision_ui() -> void:
 	plan_stack.add_child(_label("Cultist Prepared Hex · 1 Power · target's next combat die -1", 13))
 	planning_hex = OptionButton.new()
 	plan_stack.add_child(planning_hex)
+	plan_stack.add_child(_label("Equipment · control a Settlement · up to 3 items", 13))
+	planning_purchase = OptionButton.new()
+	plan_stack.add_child(planning_purchase)
 	planning_dialog.confirmed.connect(_submit_plan)
+
+func _build_victory_ui() -> void:
+	victory_panel = _panel(Color("1c343d"), 30)
+	victory_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
+	victory_panel.offset_left = -300
+	victory_panel.offset_right = 300
+	victory_panel.offset_top = -180
+	victory_panel.offset_bottom = 180
+	victory_panel.hide()
+	add_child(victory_panel)
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 20)
+	victory_panel.add_child(stack)
+	stack.add_child(_label("THE REALM HAS CHOSEN", 13, GOLD))
+	victory_text = _label("", 21)
+	victory_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stack.add_child(victory_text)
+	stack.add_child(_button("victory_continue", "Review the final board", func() -> void: victory_panel.hide(); _publish_bridge()))
+	stack.add_child(_button("victory_export", "Export the full action log", _export_log))
+	cinematic = _panel(Color("28423e"), 16)
+	cinematic.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+	cinematic.offset_left = -320
+	cinematic.offset_right = 320
+	cinematic.offset_top = 160
+	cinematic.offset_bottom = 240
+	cinematic.hide()
+	add_child(cinematic)
+	var row := HBoxContainer.new()
+	cinematic.add_child(row)
+	cinematic_text = _label("", 16, GOLD)
+	cinematic_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	cinematic_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(cinematic_text)
+	row.add_child(_button("skip_effect", "Dismiss", func() -> void: cinematic.hide()))
+
+func _build_settings() -> void:
+	settings_dialog = AcceptDialog.new()
+	settings_dialog.title = "Settings · saved on this device"
+	add_child(settings_dialog)
+	var stack := VBoxContainer.new()
+	stack.custom_minimum_size.x = 420
+	stack.add_theme_constant_override("separation", 12)
+	settings_dialog.add_child(stack)
+	for channel: String in ["master", "music", "sfx", "ui"]:
+		var row := HBoxContainer.new()
+		stack.add_child(row)
+		var label := _label(channel.to_upper(), 14, MUTED)
+		label.custom_minimum_size.x = 100
+		row.add_child(label)
+		var slider := HSlider.new()
+		slider.min_value = 0.0
+		slider.max_value = 1.0
+		slider.step = 0.05
+		slider.value = preferences.values[channel]
+		slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		slider.value_changed.connect(func(value: float) -> void: preferences.set_value(channel, value))
+		row.add_child(slider)
+	var motion := CheckButton.new()
+	motion.text = "Reduced motion"
+	motion.button_pressed = preferences.values.reduced_motion
+	motion.toggled.connect(func(value: bool) -> void: preferences.set_value("reduced_motion", value); _apply_preferences())
+	stack.add_child(motion)
+	var hints := CheckButton.new()
+	hints.text = "Show first-time action hints"
+	hints.button_pressed = preferences.values.hints
+	hints.toggled.connect(func(value: bool) -> void: preferences.set_value("hints", value))
+	stack.add_child(hints)
+	stack.add_child(_label("Animation speed", 14, MUTED))
+	var speed := OptionButton.new()
+	for title_value: String in ["Relaxed · 0.5×", "Normal · 1×", "Fast · 2×"]: speed.add_item(title_value)
+	speed.selected = [0.5, 1.0, 2.0].find(preferences.values.animation_speed)
+	speed.item_selected.connect(func(index: int) -> void: preferences.set_value("animation_speed", [0.5, 1.0, 2.0][index]); _apply_preferences())
+	stack.add_child(speed)
+	stack.add_child(_label("Interface scale", 14, MUTED))
+	var scale_choice := OptionButton.new()
+	for title_value: String in ["Compact · 85%", "Standard · 100%", "Large · 115% (1600×900 recommended)"]: scale_choice.add_item(title_value)
+	scale_choice.selected = [0.85, 1.0, 1.15].find(preferences.values.ui_scale)
+	scale_choice.item_selected.connect(func(index: int) -> void: preferences.set_value("ui_scale", [0.85, 1.0, 1.15][index]); _apply_preferences())
+	stack.add_child(scale_choice)
+	stack.add_child(_label("Music bus is ready for a future soundtrack.\nAll important cues also appear as text in the Chronicle.", 12, MUTED))
+
+func _apply_preferences() -> void:
+	reduced_motion = preferences.values.reduced_motion
+	board.motion = not reduced_motion
+	board.set_meta("animation_speed", float(preferences.values.animation_speed))
+	var scale_value: float = float(preferences.values.ui_scale)
+	var actual: Vector2i = DisplayServer.window_get_size()
+	if scale_value > 1.0 and (actual.x < 1472 or actual.y < 828): scale_value = 1.0
+	get_tree().root.content_scale_size = Vector2i(roundi(1280.0 / scale_value), roundi(720.0 / scale_value))
+
+func _refresh_victory(events: Array) -> void:
+	var state: Dictionary = rules.state.data
+	var threats: PackedStringArray = []
+	for claim: Dictionary in state.get("victory_claims", {}).values():
+		threats.append("%s claims %s — interrupt before R%d Resolution" % [String(claim.player_id).to_upper(), String(claim.route).capitalize(), int(claim.created_round) + 1])
+	for id: String in state.get("commitments", {}):
+		if state.commitments[id].kind == "ritual": threats.append("%s is performing the Ascension Ritual — interrupt before their next action" % id.to_upper())
+	threat_label.text = "  |  ".join(threats)
+	threat_label.visible = not threats.is_empty()
+	if state.phase != "victory": victory_panel.hide()
+	for event: Dictionary in events:
+		if event.type in ["VictoryClaimCreated", "VictoryClaimCanceled", "RitualBegun", "RitualCanceled"]:
+			preferences.cue()
+			cinematic_text.text = "%s · %s" % [String(event.actor_id).to_upper(), String(event.type).capitalize()]
+			cinematic_seconds = 1.2 if reduced_motion else 2.4
+			cinematic.show()
+		if event.type == "VictoryAchieved":
+			preferences.cue()
+			_show_victory()
+
+func _show_victory() -> void:
+	var victory: Dictionary = rules.state.data.get("victory", {})
+	if victory.is_empty(): return
+	var names: PackedStringArray = []
+	for id: String in victory.winners: names.append("%s · %s" % [id.to_upper(), rules.state.data.heroes[id].name])
+	victory_text.text = "%s\n\n%s victory · Round %d\n\n%d commands tell the story of this realm." % [" & ".join(names), String(victory.route).capitalize(), victory.round, rules.state.data.command_sequence]
+	victory_panel.show()
 
 func _open_plan() -> void:
 	planning_seat = viewer
@@ -387,6 +566,13 @@ func _open_plan() -> void:
 		planning_hex.add_item("%s %s" % [id.to_upper(), options.prepared_hex_targets[id].name])
 		planning_hex.set_item_metadata(planning_hex.item_count - 1, id)
 	planning_hex.disabled = planning_hex.item_count == 1
+	planning_purchase.clear()
+	planning_purchase.add_item("No equipment purchase")
+	for id: String in options.get("purchases", {}):
+		var item: Dictionary = options.purchases[id]
+		planning_purchase.add_item("%s · %s Gold" % [item.get("name", id), item.get("cost", 4)])
+		planning_purchase.set_item_metadata(planning_purchase.item_count - 1, id)
+	planning_purchase.disabled = planning_purchase.item_count == 1
 	planning_dialog.popup_centered()
 
 func _submit_plan() -> void:
@@ -394,6 +580,7 @@ func _submit_plan() -> void:
 	if planning_push.button_pressed: plan.initiative_push = true
 	if planning_snare.selected > 0: plan.snare = planning_snare.get_item_metadata(planning_snare.selected)
 	if planning_hex.selected > 0: plan.prepared_hex = planning_hex.get_item_metadata(planning_hex.selected)
+	if planning_purchase.selected > 0: plan.purchases = [planning_purchase.get_item_metadata(planning_purchase.selected)]
 	_command({"type": "submit_plan", "player_id": planning_seat, "plan": plan})
 
 func _decision_player() -> String:
@@ -405,12 +592,18 @@ func _decision_player() -> String:
 		ids.push_front(combat.attacker_id)
 	for id: String in ids:
 		var legal: Dictionary = rules.legal_actions(id)
-		for kind: String in ["choose_stance", "resolve_reaction", "spend_fate", "decline_fate", "displace"]:
+		for kind: String in ["choose_stance", "resolve_reaction", "spend_fate", "decline_fate", "displace", "choose_reward"]:
 			if legal.has(kind): return id
 	return ""
 
 func _decision_key() -> String:
 	return "%s:%s" % [rules.state.data.state_version, _decision_player()]
+
+func _handoff_for(actor: String, key: String) -> void:
+	if decision_ack == key: return
+	pending_handoff_key = key
+	handoff_label.text = "Hand control to %s · %s" % [actor.to_upper(), rules.state.data.heroes[actor].name]
+	handoff.show()
 
 func _refresh_decision_actions(actor: String) -> void:
 	var legal: Dictionary = rules.legal_actions(actor)
@@ -423,9 +616,8 @@ func _refresh_decision_actions(actor: String) -> void:
 			var button := _button("stance_" + stance, stance.capitalize(), func() -> void: _command({"type": "choose_stance", "player_id": actor, "stance": stance}))
 			button.tooltip_text = descriptions.get(stance, "")
 			actions.add_child(button)
-		if decision_ack != _decision_key():
-			handoff_label.text = "Hand control to %s · %s" % [actor.to_upper(), rules.state.data.heroes[actor].name]
-			handoff.show()
+		if decision_ack != _decision_key() and local_mode != "solo":
+			_handoff_for(actor, _decision_key())
 	elif legal.has("resolve_reaction"):
 		var reaction: Dictionary = rules.state.data.get("pending_reaction", {})
 		instruction.text += " · " + String(reaction.get("kind", "reaction")).replace("_", " ").capitalize()
@@ -441,6 +633,12 @@ func _refresh_decision_actions(actor: String) -> void:
 		instruction.text += " · choose your displacement hex"
 		for hex: String in legal.displace.targets:
 			actions.add_child(_button("displace_" + hex, hex, func() -> void: _command({"type": "displace", "player_id": actor, "target": hex})))
+	elif legal.has("choose_reward"):
+		instruction.text += " · Fate reveals two rewards; choose one"
+		for choice in legal.choose_reward.choices:
+			var choice_id: String = str(choice)
+			var reward: Dictionary = legal.choose_reward.choices[choice_id]
+			actions.add_child(_button("reward_" + choice_id, reward.get("label", choice_id.replace("_", " ").capitalize()), func() -> void: _command({"type": "choose_reward", "player_id": actor, "choice": choice_id})))
 	if combat.get("stage", "") != "stances" and not combat.is_empty():
 		selected_panel.custom_minimum_size.y = 210
 		var stances: Dictionary = combat.get("stances", {})
@@ -452,7 +650,7 @@ func _combat_summary(calculation: Dictionary) -> String:
 
 func _new_game(seed_value: int) -> void:
 	rules = Rules.new(seed_value)
-	viewer = "p1"
+	viewer = human_seat if local_mode == "solo" else "p1"
 	selected_hex = ""
 	move_mode = false
 	target_mode = ""
@@ -471,16 +669,21 @@ func _regenerate() -> void:
 	feedback.text = "World regenerated from seed %s. All seats reset." % seed_edit.text
 	_publish_bridge()
 
-func _command(command: Dictionary) -> Dictionary:
+func _command(command: Dictionary, source: String = "presentation") -> Dictionary:
 	command["expected_version"] = rules.state.data.state_version if not command.has("expected_version") else command.expected_version
-	last_result = logger.execute(rules, command, "presentation")
+	last_result = logger.execute(rules, command, source)
 	if last_result.is_valid:
 		move_mode = false
 		target_mode = ""
 		var actor: String = rules.current_actor()
-		if not actor.is_empty(): viewer = actor
+		if local_mode == "solo": viewer = human_seat
+		elif not actor.is_empty(): viewer = actor
 		feedback.text = "Accepted · %s · state %s" % [command.type, rules.state.data.state_version]
 		_refresh(last_result.get("events", []))
+		for event: Dictionary in last_result.get("events", []):
+			if event.type in ["ResolutionCompleted", "RoundStarted", "VictoryAchieved"]:
+				_save_game(AUTO_SAVE, true)
+				break
 	else:
 		feedback.text = "%s · %s" % [last_result.reason_code, last_result.get("message", "Command rejected")]
 		_publish_bridge()
@@ -493,6 +696,12 @@ func _clear(node: Node) -> void:
 
 func _refresh(events: Array = []) -> void:
 	var state: Dictionary = rules.state.data
+	if local_mode == "hotseat" and state.phase == "planning":
+		for id: String in state.heroes:
+			if id not in state.ready:
+				viewer = id
+				break
+	session_label.text = "SOLO · %s + 3 BOTS" % human_seat.to_upper() if local_mode == "solo" else ("HOTSEAT · FOUR HUMANS" if local_mode == "hotseat" else "LOCAL · ALL FOUR SEATS")
 	phase_title.text = "ROUND %02d  /  %s" % [state.round_number, String(state.phase).replace("_", " ").to_upper()]
 	_clear(phase_steps)
 	for phase: String in PHASES:
@@ -516,6 +725,7 @@ func _refresh(events: Array = []) -> void:
 	_refresh_selection()
 	_refresh_actions()
 	_refresh_journal()
+	_refresh_victory(events)
 	board.sync(state, viewer, events)
 	var targets: Dictionary = {}
 	if move_mode and not rules.current_actor().is_empty():
@@ -541,7 +751,7 @@ func _refresh_cards() -> void:
 		stack.add_theme_constant_override("separation", 2)
 		panel.add_child(stack)
 		var select := _button("seat_" + id, "%s   %s%s" % [id.to_upper(), hero.name, "  *" if rules.current_actor() == id else ""], func() -> void:
-			viewer = id
+			if local_mode != "solo": viewer = id
 			selected_hex = rules.state.data.heroes[id].hex
 			board.selected = selected_hex
 			board.focus_hex(selected_hex)
@@ -568,6 +778,10 @@ func _refresh_cards() -> void:
 			pip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 			pip.color = color if index < hero.fate else Color("3d5156")
 			fate_row.add_child(pip)
+		var progress: Dictionary = rules.victory_progress(id)
+		stack.add_child(_label("Ancients %d/4 · Markets %d/2 · Relics %d/3" % [progress.conquest.controlled, progress.dominion.settlements, progress.ascension.relics], 10, color))
+		select.tooltip_text += "\nConquest: hold 4 Ancient Towers including Worldspire through the next Resolution.\nDominion: 2 Settlements, an unblocked road network and 15 Gold through next Resolution.\nAscension: 3 Relics, Begin and Complete Ritual at Worldspire."
+		if not hero.upgrades.is_empty(): select.tooltip_text += "\nEquipment: " + ", ".join(hero.upgrades)
 
 func _refresh_actions() -> void:
 	_clear(actions)
@@ -575,6 +789,9 @@ func _refresh_actions() -> void:
 	var state: Dictionary = rules.state.data
 	var decision: String = _decision_player()
 	if not decision.is_empty():
+		if local_mode == "solo" and decision != human_seat:
+			instruction.text = "%s · %s is deciding…" % [decision.to_upper(), state.heroes[decision].name]
+			return
 		_refresh_decision_actions(decision)
 		return
 	match state.phase:
@@ -582,20 +799,24 @@ func _refresh_actions() -> void:
 			instruction.text = "A new round begins. Survey the realm, then prepare your plans."
 			actions.add_child(_button("advance", "Begin Planning  >", func() -> void: _command({"type": "advance"})))
 		"planning":
-			instruction.text = "Planning · submit all four seats to reveal initiative together."
+			instruction.text = "Planning · prepare equipment and abilities, then Ready to reveal initiative together."
 			for id: String in state.heroes:
 				var ready: bool = id in state.ready
 				var button := _button("ready_" + id, "%s %s" % [id.to_upper(), "Ready OK" if ready else "Ready"], func() -> void: _command({"type": "ready", "player_id": id}))
-				button.disabled = ready
+				button.disabled = ready or (local_mode == "solo" and id != human_seat) or (local_mode == "hotseat" and id != viewer)
 				actions.add_child(button)
 			var plan_button := _button("plan", "Plan for %s" % viewer.to_upper(), _open_plan)
 			plan_button.disabled = viewer in state.ready
 			actions.add_child(plan_button)
+			if local_mode == "hotseat": _handoff_for(viewer, "plan:%s:%s" % [state.round_number, viewer])
 		"initiative":
 			instruction.text = "Initiative revealed · Speed + d3. Each hero acts once per cycle."
 			actions.add_child(_button("advance", "Begin Action Cycle 1  >", func() -> void: _command({"type": "advance"})))
 		"cycle_1", "cycle_2":
 			var actor: String = rules.current_actor()
+			if local_mode == "solo" and actor != human_seat:
+				instruction.text = "%s · %s is taking their action…" % [actor.to_upper(), state.heroes[actor].name]
+				return
 			var legal: Dictionary = rules.legal_actions(actor)
 			instruction.text = "%s · %s's action · select Move, then a highlighted hex." % [actor.to_upper(), state.heroes[actor].name]
 			var move_button := _button("move", "Move" + (" *" if move_mode else ""), func() -> void: target_mode = ""; move_mode = not move_mode; _refresh())
@@ -612,6 +833,16 @@ func _refresh_actions() -> void:
 			var upgrade := _button("upgrade", "Upgrade", func() -> void: _command({"type": "upgrade", "player_id": actor}))
 			upgrade.disabled = not legal.has("upgrade")
 			actions.add_child(upgrade)
+			if legal.has("explore"):
+				actions.add_child(_button("explore", "Explore", func() -> void: _command({"type": "explore", "player_id": actor})))
+				if state.heroes[actor].fate >= 2:
+					actions.add_child(_button("explore_fate", "Explore · 2 Fate", func() -> void: _command({"type": "explore", "player_id": actor, "use_fate": true})))
+			for direction: String in legal.get("trade", {}).get("choices", {}):
+				var terms: Dictionary = legal.trade.choices[direction]
+				var label: String = "%s %s → %s %s" % [terms.cost, terms.cost_resource.capitalize(), terms.gain, terms.gain_resource.capitalize()]
+				actions.add_child(_button("trade_" + direction, label, func() -> void: _command({"type": "trade", "player_id": actor, "direction": direction})))
+			for ritual: String in ["begin_ritual", "complete_ritual"]:
+				if legal.has(ritual): actions.add_child(_button(ritual, ritual.replace("_", " ").capitalize(), func() -> void: _command({"type": ritual, "player_id": actor})))
 			for special: String in legal.get("special", {}).get("choices", {}):
 				var button := _button("special_" + special, special.replace("_", " ").capitalize(), func() -> void:
 					if special == "forced_march":
@@ -630,6 +861,11 @@ func _refresh_actions() -> void:
 		"resolution":
 			instruction.text = "Resolution · pay location income, recover Health, gain capped Fate."
 			actions.add_child(_button("advance", "Resolve round  >", func() -> void: _command({"type": "advance"})))
+		"victory":
+			var victory: Dictionary = state.get("victory", {})
+			instruction.text = "%s wins · %s · Round %s" % [", ".join(victory.get("winners", [])), String(victory.get("route", "victory")).capitalize(), victory.get("round", state.round_number)]
+			actions.add_child(_button("new_match", "Play another realm", func() -> void: _new_game(int(seed_edit.text) + 1); welcome.show()))
+			actions.add_child(_button("victory_log", "Export match log", _export_log))
 
 func _select_hex(hex: String) -> void:
 	selected_hex = hex
@@ -754,6 +990,47 @@ func _save_snapshot() -> void:
 		if file: file.store_string(text_value)
 	feedback.text = "Snapshot exported. CLI can inspect and continue the same rules state."
 
+func _save_game(path: String, automatic: bool = false) -> void:
+	var result: Dictionary = saves.write(path, rules.snapshot(), {"mode": local_mode, "human_seat": human_seat})
+	if not automatic:
+		feedback.text = "Saved · %s" % path if result.ok else "Save failed · %s" % result.get("message", result.get("error", "unknown"))
+	_publish_bridge()
+
+func _open_load() -> void:
+	buttons.load_manual.disabled = not saves.exists(MANUAL_SAVE)
+	buttons.load_auto.disabled = not saves.exists(AUTO_SAVE)
+	load_dialog.popup_centered()
+	_publish_bridge.call_deferred()
+
+func _load_game(path: String) -> void:
+	var result: Dictionary = saves.read(path)
+	if not result.ok:
+		feedback.text = "Load failed · %s" % result.get("message", result.get("error", "unknown"))
+		return
+	var restored: RefCounted = Rules.from_snapshot(result.snapshot)
+	if restored == null:
+		feedback.text = "Load failed · snapshot validation failed."
+		return
+	rules = restored
+	local_mode = result.metadata.get("mode", "sandbox")
+	if local_mode not in ["sandbox", "solo", "hotseat"]: local_mode = "sandbox"
+	human_seat = result.metadata.get("human_seat", "p1")
+	if not rules.state.data.heroes.has(human_seat): human_seat = "p1"
+	viewer = human_seat if local_mode == "solo" else "p1"
+	seed_edit.text = str(rules.state.data.master_seed)
+	selected_hex = ""
+	move_mode = false
+	target_mode = ""
+	decision_ack = ""
+	board.build(rules.state.data.map)
+	started = true
+	welcome.hide()
+	load_dialog.hide()
+	_refresh()
+	if rules.state.data.phase == "victory": _show_victory()
+	feedback.text = "Loaded round %d · %s" % [rules.state.data.round_number, rules.state.data.phase]
+	_publish_bridge()
+
 func _export_log() -> void:
 	var text_value: String = logger.to_jsonl()
 	if OS.has_feature("web"):
@@ -764,7 +1041,17 @@ func _export_log() -> void:
 	feedback.text = "Action log exported: commands, results, events, RNG and before/after checksums."
 
 func _process(delta: float) -> void:
+	if cinematic.visible:
+		cinematic_seconds -= delta
+		if cinematic_seconds <= 0: cinematic.hide()
 	if not started: return
+	if local_mode == "solo" and not welcome.visible and not planning_dialog.visible and not load_dialog.visible:
+		bot_elapsed += delta
+		if bot_elapsed >= 0.45:
+			bot_elapsed = 0.0
+			var command: Dictionary = Bot.choose(rules)
+			if not command.is_empty() and command.get("player_id", "") != human_seat:
+				_command(command, "solo_bot")
 	var focus: Control = get_viewport().gui_get_focus_owner()
 	if focus is LineEdit: return
 	var direction := Vector2.ZERO
@@ -828,4 +1115,6 @@ func _publish_bridge() -> void:
 	var ui: Dictionary = {"controls": controls, "phase_title": phase_title.text, "instruction": instruction.text, "feedback": feedback.text, "selected": selected_hex, "move_mode": move_mode, "debug_visible": debug_panel.visible, "journal": log_text.get_parsed_text(), "viewport": {"x": view_rect.position.x, "y": view_rect.position.y, "width": view_rect.size.x, "height": view_rect.size.y}, "size": {"width": size.x, "height": size.y}, "hexes": board.projected_hexes(), "camera": {"yaw": board.yaw, "zoom": board.zoom, "x": board.focus_point.x, "z": board.focus_point.z}}
 	var actor: String = rules.current_actor()
 	ui["decision_player"] = _decision_player()
+	ui["mode"] = local_mode
+	ui["human_seat"] = human_seat
 	JavaScriptBridge.eval("if(window.realm){window.realm.state = %s; window.realm.ui = %s; window.realm.lastResult = %s; window.realm.legal = %s;}" % [JSON.stringify(rules.snapshot()), JSON.stringify(ui), JSON.stringify(last_result), JSON.stringify(rules.legal_actions(actor) if not actor.is_empty() else {})], true)
