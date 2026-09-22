@@ -15,13 +15,23 @@ const help = `Shattered Realm — the same Godot rules from your terminal
   npm run cli -- ready p1
   npm run cli -- move p1 0,1
   npm run cli -- capture p1
+  npm run cli -- attack p1 p2
+  npm run cli -- stance p1 assault
+  npm run cli -- fate p1
+  npm run cli -- decline-fate p1
+  npm run cli -- displace p2 0,1
+  npm run cli -- reaction p3 decline
+  npm run cli -- special p2 forced_march 0,1
+  npm run cli -- rest p1
+  npm run cli -- upgrade p1
   npm run cli -- pass p1
   npm run cli -- command '{"type":"move","player_id":"p1","target":"0,1"}'
   npm run cli -- command --file command.json
   npm run cli -- simulate --rounds 3
+  npm run cli -- bot-step
   npm run cli -- replay
   npm run cli -- validate-map --seed 1 --count 100
-  npm run cli -- logs [--json] [--limit 20]
+  npm run cli -- logs [--json] [--limit 20] [--actor p1] [--event CombatResolved] [--rejected]
 
 Options: --state FILE (default .realm/state.json), --json, --expected-version N,
          --expected-phase PHASE, --command-id ID. GODOT_BIN pins the executable.
@@ -32,12 +42,12 @@ Read-only commands do not change state or gameplay RNG.`;
 function parseArgs(args) {
   const positional = [];
   const options = {};
-  const valueFlags = new Set(['state', 'seed', 'rounds', 'count', 'file', 'limit', 'expected-version', 'expected-phase', 'command-id']);
+  const valueFlags = new Set(['state', 'seed', 'rounds', 'count', 'file', 'limit', 'actor', 'event', 'expected-version', 'expected-phase', 'command-id']);
   for (let index = 0; index < args.length; index++) {
     const value = args[index];
     if (!value.startsWith('--')) { positional.push(value); continue; }
     const key = value.slice(2);
-    if (key === 'json' || key === 'help') { options[key] = true; continue; }
+    if (key === 'json' || key === 'help' || key === 'rejected') { options[key] = true; continue; }
     if (!valueFlags.has(key)) throw new Error(`Unknown option ${value}.`);
     if (index + 1 === args.length) throw new Error(`Missing value for ${value}.`);
     options[key] = args[++index];
@@ -108,19 +118,33 @@ async function main() {
     const limit = integer(options.limit, 20, 'limit', 1, 100000);
     let text;
     try { text = await readFile(logFile, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; text = ''; }
-    const entries = text.trim().split('\n').filter(Boolean).slice(-limit).map(line => JSON.parse(line));
+    const entries = text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(entry => {
+      if (options.actor && entry.command?.player_id !== options.actor && !entry.events?.some(event => event.actor_id === options.actor)) return false;
+      if (options.event && !entry.events?.some(event => event.type === options.event)) return false;
+      if (options.rejected && entry.accepted) return false;
+      return true;
+    }).slice(-limit);
     console.log(options.json ? JSON.stringify(entries, null, 2) : entries.map(formatLog).join('\n') || 'No recorded actions.');
     return;
   }
   const request = { operation, log_path: logFile };
-  const aliases = new Set(['advance', 'ready', 'move', 'capture', 'pass', 'plan', 'submit_plan']);
+  const canonicalNames = { plan: 'submit_plan', stance: 'choose_stance', fate: 'spend_fate', 'decline-fate': 'decline_fate', reaction: 'resolve_reaction', rest: 'special', 'forced-march': 'special' };
+  const aliases = new Set(['advance', 'ready', 'move', 'capture', 'pass', 'plan', 'submit_plan', 'attack', 'stance', 'choose_stance', 'fate', 'spend_fate', 'decline-fate', 'decline_fate', 'displace', 'reaction', 'resolve_reaction', 'special', 'rest', 'forced-march', 'upgrade']);
   if (aliases.has(operation) || operation === 'command') {
     let command;
     if (operation === 'command') command = options.file ? await readJson(path.resolve(options.file)) : JSON.parse(player ?? '{}');
     else {
-      command = { type: operation === 'plan' ? 'submit_plan' : operation };
+      command = { type: canonicalNames[operation] ?? operation };
       if (player) command.player_id = player;
-      if (operation === 'move') command.target = value ?? '';
+      if (command.type === 'move' || command.type === 'displace') command.target = value ?? '';
+      if (command.type === 'attack') command.target_id = value ?? '';
+      if (command.type === 'choose_stance') command.stance = value ?? '';
+      if (command.type === 'resolve_reaction') command.choice = value ?? 'decline';
+      if (command.type === 'special') {
+        command.special_id = operation === 'rest' ? 'rest' : operation === 'forced-march' ? 'forced_march' : value;
+        const target = operation === 'forced-march' ? value : positional[3];
+        if (target) command.target = target;
+      }
       if (operation === 'plan' || operation === 'submit_plan') command.plan = JSON.parse(value ?? '{}');
     }
     if (!command || typeof command !== 'object' || Array.isArray(command)) throw new Error('Command must be a JSON object.');
@@ -129,12 +153,12 @@ async function main() {
     if (options['command-id']) command.command_id = options['command-id'];
     request.operation = 'command';
     request.command = command;
-  } else if (!['new', 'state', 'legal', 'simulate', 'replay', 'validate-map'].includes(operation)) throw new Error(`Unknown command ${operation}. Use help.`);
+  } else if (!['new', 'state', 'legal', 'simulate', 'bot-step', 'replay', 'validate-map'].includes(operation)) throw new Error(`Unknown command ${operation}. Use help.`);
   if (operation === 'legal') request.player_id = player ?? '';
   if (operation === 'new' || operation === 'validate-map') request.seed = integer(options.seed, 20260922, 'seed', -2147483648, 2147483647);
   if (operation === 'validate-map') request.count = integer(options.count, 1, 'count', 1, 10000);
   if (operation === 'simulate') request.rounds = integer(options.rounds, 3, 'rounds', 1, 1000);
-  const mutations = ['new', 'command', 'simulate'].includes(request.operation);
+  const mutations = ['new', 'command', 'simulate', 'bot-step'].includes(request.operation);
   await mkdir(path.dirname(stateFile), { recursive: true });
   let lock;
   let temporary;

@@ -41,6 +41,12 @@ test('CLI persists shared rules, records rejected attempts, simulates and verifi
     const entries = invoke(state, ['logs', '--limit', '1000']);
     assert.equal(entries.filter(entry => !entry.accepted).length, 2);
     assert.ok(entries.some(entry => entry.events.some(event => event.type === 'IncomeGranted')));
+    const rejectedOnly = invoke(state, ['logs', '--rejected', '--limit', '1000']);
+    assert.equal(rejectedOnly.length, 2);
+    assert.ok(rejectedOnly.every(entry => !entry.accepted));
+    const incomeOnly = invoke(state, ['logs', '--event', 'IncomeGranted', '--limit', '1000']);
+    assert.equal(incomeOnly.length, 3);
+    assert.ok(incomeOnly.every(entry => entry.events.some(event => event.type === 'IncomeGranted')));
     for (const entry of entries) {
       assert.match(entry.checksum_before, /^[a-f0-9]{64}$/);
       assert.match(entry.checksum_after, /^[a-f0-9]{64}$/);

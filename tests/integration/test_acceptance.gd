@@ -3,6 +3,7 @@ extends RefCounted
 const Rules = preload("res://scripts/domain/game_rules.gd")
 const Movement = preload("res://scripts/domain/resolvers/movement.gd")
 const ActionLog = preload("res://scripts/services/action_logger.gd")
+const SimpleBot = preload("res://scripts/domain/bots/simple_bot.gd")
 
 var errors: Array[String] = []
 var logger: RefCounted
@@ -30,7 +31,7 @@ func _test_fixture() -> void:
 		_check(first.checksum() == second.checksum(), "Fixture replay diverged at " + str(command["type"]))
 	_check(JSON.stringify(first.snapshot()["events"]) == JSON.stringify(second.snapshot()["events"]), "Identical fixture must produce identical events including RNG results")
 
-func _send(rules: RefCounted, command: Dictionary) -> bool:
+func _send(rules: RefCounted, command: Dictionary, resolve_windows: bool = true) -> bool:
 	# Every phase/action is saved through JSON, restored, and continued in parallel.
 	var restored: RefCounted = Rules.from_snapshot(JSON.parse_string(JSON.stringify(rules.snapshot())))
 	_check(restored != null, "Valid snapshot could not restore before " + JSON.stringify(command))
@@ -42,6 +43,16 @@ func _send(rules: RefCounted, command: Dictionary) -> bool:
 	_check(result.get("is_valid", false), "Acceptance command rejected: %s %s" % [JSON.stringify(command), JSON.stringify(result)])
 	_check(continued.get("is_valid", false), "Restored game rejected legal continuation")
 	_check(rules.checksum() == restored.checksum(), "Save/load continuation diverged in state or RNG")
+	if result.get("is_valid", false) and resolve_windows:
+		var windows: int = 0
+		while not rules.state.data.get("pending_combat", {}).is_empty() or not rules.state.data.get("pending_reaction", {}).is_empty():
+			windows += 1
+			if windows > 16:
+				errors.append("Acceptance action stalled in a pending decision")
+				return false
+			var response: Dictionary = SimpleBot.choose(rules)
+			if response.is_empty() or not _send(rules, response, false):
+				return false
 	return bool(result.get("is_valid", false))
 
 func _test_three_rounds() -> void:

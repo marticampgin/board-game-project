@@ -3,7 +3,7 @@ extends SceneTree
 
 const Rules = preload("res://scripts/domain/game_rules.gd")
 const MapGenerator = preload("res://scripts/domain/generation/map_generator.gd")
-const Movement = preload("res://scripts/domain/resolvers/movement.gd")
+const SimpleBot = preload("res://scripts/domain/bots/simple_bot.gd")
 const ActionLog = preload("res://scripts/services/action_logger.gd")
 
 var logger: RefCounted
@@ -73,6 +73,13 @@ func _handle(request: Dictionary) -> Dictionary:
 		"simulate":
 			response.merge(_simulate(rules, int(request.get("rounds", 3))), true)
 			response["mutated"] = true
+		"bot-step":
+			var command: Dictionary = SimpleBot.choose(rules)
+			var result: Dictionary = logger.execute(rules, command, "bot")
+			response["command"] = command
+			response["result"] = result
+			response["ok"] = result.get("is_valid", false)
+			response["mutated"] = result.get("is_valid", false)
 		"replay":
 			response.merge(_replay(rules), true)
 		_:
@@ -88,25 +95,12 @@ func _handle(request: Dictionary) -> Dictionary:
 func _simulate(rules: RefCounted, rounds: int) -> Dictionary:
 	var end_round: int = int(rules.snapshot()["round_number"]) + rounds
 	var attempts: int = 0
-	var maximum: int = rounds * 40 + 40
+	var maximum: int = rounds * 120 + 120
 	var action_counts: Dictionary = {}
+	var event_counts: Dictionary = {}
 	while int(rules.snapshot()["round_number"]) < end_round and attempts < maximum:
 		var state: Dictionary = rules.snapshot()
-		var command: Dictionary
-		match str(state["phase"]):
-			"world", "initiative", "bonus", "resolution":
-				command = {"type": "advance"}
-			"planning":
-				var players: Array = state["heroes"].keys()
-				players.sort()
-				for player: String in players:
-					if not state["ready"].has(player):
-						command = {"type": "ready", "player_id": player}
-						break
-			"cycle_1", "cycle_2":
-				command = _bot_command(rules)
-			_:
-				return {"ok": false, "error": "Unsupported simulation phase: " + str(state["phase"]), "attempts": attempts}
+		var command: Dictionary = SimpleBot.choose(rules)
 		if command.is_empty():
 			return {"ok": false, "error": "Simulation found no command.", "attempts": attempts}
 		command["expected_version"] = state["state_version"]
@@ -116,32 +110,11 @@ func _simulate(rules: RefCounted, rounds: int) -> Dictionary:
 			return {"ok": false, "error": "Bot command rejected.", "command": command, "result": result, "attempts": attempts}
 		var action: String = str(command["type"])
 		action_counts[action] = int(action_counts.get(action, 0)) + 1
-	return {"ok": int(rules.snapshot()["round_number"]) == end_round, "completed_rounds": rounds, "attempts": attempts, "action_counts": action_counts, "stop_reason": "configured_round_limit"}
-
-func _bot_command(rules: RefCounted) -> Dictionary:
-	var player: String = rules.current_actor()
-	var legal: Dictionary = rules.legal_actions(player)
-	if legal.has("capture"):
-		return {"type": "capture", "player_id": player}
-	var targets: Dictionary = legal.get("move", {}).get("targets", {})
-	if targets.is_empty():
-		return {"type": "pass", "player_id": player}
-	var state: Dictionary = rules.snapshot()
-	var map_data: Dictionary = state["map"]
-	var choices: Array = targets.keys()
-	choices.sort()
-	var best: String = str(choices[0])
-	var best_score: int = 1000000
-	for target: String in choices:
-		var distances: Dictionary = Movement.travel_costs(map_data, target)
-		var score: int = 100000
-		for location: Dictionary in map_data["locations"].values():
-			if location["kind"] == "minor_tower" and str(location.get("owner_id", "")).is_empty():
-				score = mini(score, int(distances.get(location["hex"], 100000)))
-		if score < best_score:
-			best_score = score
-			best = target
-	return {"type": "move", "player_id": player, "target": best}
+		for event: Dictionary in result.get("events", []):
+			var kind: String = str(event["type"])
+			event_counts[kind] = int(event_counts.get(kind, 0)) + 1
+	var completed: bool = int(rules.snapshot()["round_number"]) == end_round
+	return {"ok": completed, "completed_rounds": rounds if completed else int(rules.snapshot()["round_number"]) - end_round + rounds, "attempts": attempts, "action_counts": action_counts, "event_counts": event_counts, "stop_reason": "configured_round_limit" if completed else "command_limit_exceeded"}
 
 func _replay(rules: RefCounted) -> Dictionary:
 	var original: Dictionary = rules.snapshot()
