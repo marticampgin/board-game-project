@@ -64,3 +64,11 @@ The user explicitly authorized completing every milestone, including the present
 - Manual saves and round autosaves use validated versioned envelopes, a temporary replacement file, and one rotating backup. Mode and human seat are presentation metadata. CLI tooling can continue the same saved domain state.
 - Presentation settings persist separately from gameplay: four audio buses, generated nonessential text-backed cues, reduced motion, animation speed, UI scale and hints. The Music bus has no soundtrack in this prototype.
 - Match duration is measured, never forced. The 40-round automated-test guard reports a failure if a bot match stalls; it cannot invent a winner or alter game rules.
+
+## Multiplayer proof defaults
+
+- Native ENet uses a direct address and configurable port (UI/CLI default 24567), one host and at most three connected client seats. Browser play remains local or solo.
+- The host advances shared phases and controls bot seats. Unclaimed seats are bots; a disconnected human's seat temporarily becomes a bot but remains reserved by a random reconnect token.
+- Planning allows 60 seconds. Actions and reactions use the specification's provisional 20-second default. Timeout handling submits ordinary validated safe commands, and another player's edits do not extend the waiting player's deadline. Tests can shorten or disable timers without modifying rules.
+- Reconnect recovers an authorized observation from the same live host. Host migration/restart recovery and production account or relay infrastructure are outside the proof.
+- Client views are not save files. Full command/RNG history stays with the host; per-player view checksums and a common public checksum provide synchronization diagnostics without sending private plans or sealed stances.

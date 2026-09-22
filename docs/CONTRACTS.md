@@ -39,3 +39,25 @@ Commands: `attack {player_id,target_id}`, `choose_stance {player_id,stance}`, `s
 Pending combat stages: `stances`, `fate_attacker`, `fate_defender`, `displacement`. Reaction kinds: `challenge`, `bribe_offer`, `bribe_response`. Reactions and combat preserve the underlying cycle and consume only the declared attack/move slot when its final resolution completes.
 
 `Combat.evaluate` is pure arithmetic and returns full stat/stance/modifier/die totals and outcome fields. `battle_flow.gd` applies costs, damage, drops and recovery; `class_flow.gd` handles simultaneous preparation and interrupted paths. `SimpleBot.choose(rules)` proposes one ordinary command without mutating state.
+
+## Milestone 3 extensions
+
+Content version `0.3.0-m3` is the complete rules format. State adds `pending_exploration`, `world_effects`, `market_hex`, `victory_claims`, and `victory`; terminal phase is `victory`. The presentation/application version can advance without changing this content schema.
+
+Commands: `trade {player_id,direction:gold_to_power|power_to_gold}`, `explore {player_id,use_fate?:bool}`, `choose_reward {player_id,choice:reward_id}`, `begin_ritual {player_id}`, `complete_ritual {player_id}`. `special.dark_bargain` is the Cultist exploration branch. Planning accepts `purchases:Array[String]`, at most three equipped items overall.
+
+Legal Trade choices provide `cost_resource/cost/gain_resource/gain`. Explore provides `alternatives_available`, cost and reward odds. `choose_reward.choices` is a Dictionary keyed by reward ID, with display definitions as values. Planning `purchases` is a Dictionary keyed by upgrade ID with cost, effects and description; `slots` gives remaining equipment capacity. `victory_progress(player_id)` returns the Conquest, Dominion and Ascension tracks. Victory is `{winners:Array[String],route,round,shared,details}`.
+
+`SnapshotStore.write/read` deals only with `user://` paths and validates a save envelope `{save_format:1,snapshot,metadata}`. Mode and human seat are metadata. Canonical domain checksums exclude metadata. CLI loaders understand both envelopes and raw snapshots. `SimpleBot.choose(rules, preferences={})` allows deterministic route preferences for test scenarios; ordinary Solo uses class goals and public information.
+
+## Milestone 5 transport boundary
+
+`NetworkSession` is a Node using its own `SceneMultiplayer` subtree and native ENet. Its methods are `host_game(port,seed)->Error`, `join_game(address,port,token="")->Error`, `start_match()->Dictionary`, `submit(command)->void`, and `disconnect_session()`. Signals: `observation_updated(view)`, `lobby_updated(lobby)`, `command_result(result)`, `connection_failed(message)`. Host-only `submit_as_host` is a local harness/bot entry point and is never an RPC.
+
+The host owns `GameRules` and RNG. Clients submit a monotonic client sequence, expected state version and their own seat's command. Seat identity comes from the connection; payload identity cannot impersonate another player. Rejected requests are logged without changing authoritative game state. The host advances shared phases, drives bot seats and applies configurable safe timeout defaults.
+
+An observation is `{player_id,state_version,state,legal_actions,victory_progress,public_checksum,view_checksum,started,lobby}`. `state` is a filtered view, **not a save**. It omits seed, RNG, command history, opponents' plans/preparations/hints, sealed opposing stances and undiscovered site/monster details. Site and Relic identifiers are normalized where their original IDs would reveal hidden content. Opposing plans are never sent merely for a UI to hide them. Each client verifies its view checksum; the public checksum is identical across different authorized views of the same version.
+
+`RemoteRulesView` exposes read-only `state`, `legal_actions`, `current_actor`, `victory_progress`, `snapshot` and `checksum` for the existing presenter. It cannot execute rules or restore a match. Native Main routes commands through NetworkSession; the browser development bridge remains a local-game testing tool.
+
+Reconnect tokens reserve and reclaim a disconnected human's seat while the host process remains alive. The host sends a fresh authorized observation. There is no host migration, Internet relay, account service or production matchmaking in this proof.
