@@ -330,7 +330,7 @@ func _rebuild_features(state: Dictionary, viewer: String) -> void:
 			_label(features, "?", pos + Vector3(0, 0.5, 0), Color("9db3af"))
 			continue
 		var color: Color = TEAM[int(owner.substr(1)) - 1] if not owner.is_empty() else Color("c8bd9d")
-		var trait: String = location.get("trait", "") if discovered else ""
+		var trait_id: String = location.get("trait", "") if discovered else ""
 		match location.kind:
 			"minor_tower", "ancient_tower", "worldspire":
 				var height: float = 1.35 if major else 0.65
@@ -340,11 +340,11 @@ func _rebuild_features(state: Dictionary, viewer: String) -> void:
 				_cylinder(features, pos + Vector3(0, height + 0.08, 0), 0.34, 0.25, color, 6)
 				for level in range(1, int(location.level)):
 					_cylinder(features, pos + Vector3(0, height * 0.27 + level * 0.2, 0), 0.30 if major else 0.25, 0.06, Color("d4bd83"), 6)
-				if trait == "fortress":
+				if trait_id == "fortress":
 					for side in range(4):
 						var angle := side * PI * 0.5
 						_box(features, pos + Vector3(cos(angle) * 0.3, height + 0.25, sin(angle) * 0.3), Vector3(0.13, 0.16, 0.13), color)
-				elif trait == "watchtower":
+				elif trait_id == "watchtower":
 					_cylinder(features, pos + Vector3(0, height + 0.3, 0), 0.42, 0.22, color.darkened(0.12), 6, 0)
 				if location.kind == "worldspire":
 					var crystal := _cylinder(features, pos + Vector3(0, height + 0.54, 0), 0.23, 0.72, Color("81d3d0"), 4, 0)
