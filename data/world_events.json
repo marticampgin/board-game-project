@@ -1,0 +1,7 @@
+{
+  "collapsed_bridge":{"id":"collapsed_bridge","name":"Collapsed Bridge","resolver":"collapsed_bridge","duration_rounds":2,"condition":"open_bridge_with_alternate_route","description":"A marked bridge closes for two rounds; an alternate route remains open."},
+  "unstable_leyline":{"id":"unstable_leyline","name":"Unstable Leyline","resolver":"unstable_leyline","duration_rounds":1,"condition":"tower_exists","description":"One Tower yields +1 Power and has -1 Defence until Resolution."},
+  "monster_migration":{"id":"monster_migration","name":"Monster Migration","resolver":"monster_migration","duration_rounds":0,"condition":"living_unreinforced_monster","description":"The camp nearest the richest hero gains +1 Health and Defence, up to two reinforcements."},
+  "cursed_ground":{"id":"cursed_ground","name":"Cursed Ground","resolver":"cursed_ground","duration_rounds":1,"condition":"region_with_plains","description":"A region's Plains cost Forest movement until Resolution; combat terrain is unchanged."},
+  "wandering_market":{"id":"wandering_market","name":"Wandering Market","resolver":"wandering_market","duration_rounds":1,"condition":"neutral_unoccupied_hex","description":"An unoccupied neutral hex permits Trade until Resolution."}
+}

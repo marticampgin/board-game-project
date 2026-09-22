@@ -1,0 +1,10 @@
+{
+  "iron_weapon": {"id":"iron_weapon","name":"Iron Weapon","cost":4,"tier":1,"effects":{"attack":1},"description":"+1 Attack."},
+  "reinforced_armor": {"id":"reinforced_armor","name":"Reinforced Armor","cost":4,"tier":1,"effects":{"defence":1,"initiative":-1},"description":"+1 Defence; -1 initiative."},
+  "trail_boots": {"id":"trail_boots","name":"Trail Boots","cost":4,"tier":1,"effects":{"trail_boots":true},"description":"Ignore the first extra Forest movement cost each Move."},
+  "scout_lens": {"id":"scout_lens","name":"Scout Lens","cost":4,"tier":1,"effects":{"discovery":1},"description":"Reveal location details one hex farther."},
+  "tower_kit": {"id":"tower_kit","name":"Tower Kit","cost":4,"tier":1,"effects":{"tower_discount":1},"description":"The next location Upgrade costs 1 less Gold, then this kit is consumed."},
+  "lucky_charm": {"id":"lucky_charm","name":"Lucky Charm","cost":6,"tier":2,"effects":{"lucky_charm":true},"description":"Once per round, keep your old combat die if a Fate reroll is worse."},
+  "merchant_seal": {"id":"merchant_seal","name":"Merchant Seal","cost":4,"tier":1,"effects":{"trade_bonus":1},"description":"Receive one additional resource unit in each market Trade."},
+  "ward_stone": {"id":"ward_stone","name":"Ward Stone","cost":4,"tier":1,"effects":{"relic_defence":1},"description":"+1 Defence while carrying at least one Relic."}
+}

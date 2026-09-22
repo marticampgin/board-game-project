@@ -1,0 +1,11 @@
+{
+  "ruin_relics":{"guaranteed_relics":1,"description":"Each unexhausted Ruin holds one Relic and a seeded bonus reward."},
+  "ruin_rewards":{
+    "gold_cache":{"id":"gold_cache","name":"Old Coin Cache","weight":4,"gold":3,"power":0,"healing":0,"upgrade_id":"","description":"Gain 3 Gold."},
+    "ley_fragment":{"id":"ley_fragment","name":"Ley Fragment","weight":3,"gold":0,"power":3,"healing":0,"upgrade_id":"","description":"Gain 3 Power, up to the cap."},
+    "restorative_spring":{"id":"restorative_spring","name":"Restorative Spring","weight":2,"gold":1,"power":0,"healing":3,"upgrade_id":"","description":"Recover 3 Health and gain 1 Gold."},
+    "lost_equipment":{"id":"lost_equipment","name":"Lost Scout's Lens","weight":1,"gold":0,"power":0,"healing":0,"upgrade_id":"scout_lens","description":"Equip a Scout Lens, or gain 4 Gold if already owned or all three slots are full."}
+  },
+  "ranger_affinity":{"gold_bonus":1},
+  "dark_bargain":{"health_cost":2,"power_bonus":2,"description":"Knowingly lose 2 Health without being downed; gain 2 extra Power."}
+}
