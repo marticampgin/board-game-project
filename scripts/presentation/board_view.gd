@@ -20,6 +20,7 @@ var zoom: float = 15.2
 var selected: String = ""
 var hovered: String = ""
 var reachable: Dictionary = {}
+var target_color: Color = Color("82bf8d")
 var motion: bool = true
 var movement_tweens: Dictionary = {}
 
@@ -203,10 +204,18 @@ func sync(state: Dictionary, viewer: String, events: Array = []) -> void:
 					_cylinder(features, pos + Vector3(index * 0.3 - 0.3, 0.2 + index * 0.08, 0), 0.1, 0.4 + index * 0.16, Color("9ea696"), 6)
 				_label(features, "RUIN", pos + Vector3(0, 0.9, 0), color)
 			"monster_camp":
-				_cylinder(features, pos + Vector3(0, 0.3, 0), 0.37, 0.6, Color("8e6758"), 4, 0)
-				_label(features, "CAMP", pos + Vector3(0, 0.9, 0), Color("e5ac8f"))
+				var monster: Dictionary = {}
+				for candidate: Dictionary in state.get("monsters", {}).values():
+					if candidate.hex == location.hex: monster = candidate
+				var cleared: bool = not monster.is_empty() and monster.hp <= 0
+				_cylinder(features, pos + Vector3(0, 0.3, 0), 0.37, 0.6, Color("596d69") if cleared else Color("8e6758"), 4, 0)
+				_label(features, "CLEARED" if cleared else "CAMP", pos + Vector3(0, 0.9, 0), Color("a4c1aa") if cleared else Color("e5ac8f"))
 		if not owner.is_empty():
 			_label(features, owner.to_upper(), pos + Vector3(0.45, 0.4, 0.28), color)
+	for warning: Dictionary in state.get("traps", {}).values():
+		var at: Vector3 = Hex.to_world(warning.hex)
+		_ring(features, at + Vector3(0, 0.095, 0), Color("e6b87a"), 0.61)
+		_label(features, "!", at + Vector3(0, 0.55, 0), Color("ffd090"))
 	for id: String in state.heroes:
 		var hero: Dictionary = state.heroes[id]
 		var target: Vector3 = Hex.to_world(hero.hex) + Vector3(0.27, 0.05, 0.28)
@@ -230,6 +239,11 @@ func sync(state: Dictionary, viewer: String, events: Array = []) -> void:
 					tween.tween_property(pawn, "position", target, 0.10)
 				else:
 					pawn.position = target
+		var status: Label3D = heroes[id].get_node("Status")
+		status.text = "RECOVERING" if hero.statuses.has("recovering") else ""
+		var commitment: Dictionary = state.get("commitments", {}).get(id, {})
+		if not commitment.is_empty():
+			_label(features, "CAPTURING " + id.to_upper(), Hex.to_world(hero.hex) + Vector3(0, 2.3, 0), Color("f0cd81"))
 	redraw_markers()
 
 func _make_hero(hero: Dictionary) -> Node3D:
@@ -257,6 +271,8 @@ func _make_hero(hero: Dictionary) -> Node3D:
 			_cylinder(pawn, Vector3(0, 0.87, 0), 0.18, 0.25, color.darkened(0.2), 5, 0)
 			_box(pawn, Vector3(0.28, 0.56, 0), Vector3(0.05, 1.05, 0.05), Color("c1a479"))
 	_label(pawn, String(hero.id).to_upper(), Vector3(0, 1.23, 0), color)
+	var status := _label(pawn, "", Vector3(0, 1.6, 0), Color("a1d8e0"))
+	status.name = "Status"
 	return pawn
 
 func _segment(parent: Node3D, a: Vector3, b: Vector3, color: Color, width: float) -> void:
@@ -270,14 +286,15 @@ func _ring(parent: Node3D, pos: Vector3, color: Color, radius: float = 0.88) -> 
 		var b: float = deg_to_rad((side + 1) * 60.0 - 30.0)
 		_segment(parent, pos + Vector3(cos(a), 0, sin(a)) * radius, pos + Vector3(cos(b), 0, sin(b)) * radius, color, 0.045)
 
-func set_targets(targets: Dictionary) -> void:
+func set_targets(targets: Dictionary, color: Color = Color("82bf8d")) -> void:
 	reachable = targets
+	target_color = color
 	redraw_markers()
 
 func redraw_markers() -> void:
 	_clear(markers)
 	for hex: String in reachable:
-		_ring(markers, Hex.to_world(hex) + Vector3(0, 0.06, 0), Color("82bf8d"))
+		_ring(markers, Hex.to_world(hex) + Vector3(0, 0.06, 0), target_color)
 	if not selected.is_empty() and map_data.get("hexes", {}).has(selected):
 		_ring(markers, Hex.to_world(selected) + Vector3(0, 0.08, 0), Color("f1d28e"), 0.94)
 	if reachable.has(hovered):

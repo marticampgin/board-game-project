@@ -127,3 +127,75 @@ test('1920×1080 retains board, readable controls and seed regeneration', async 
   await page.screenshot({ path: testInfo.outputPath('board-1920.png') });
   expect(errors).toEqual([]);
 });
+
+test('combat UI keeps stances secret, reveals calculation and resolves Fate in order', async ({ page }, testInfo) => {
+  const errors = await boot(page);
+  await clickControl(page, 'start');
+  const distance = (a, b) => {
+    const [aq, ar] = a.split(',').map(Number), [bq, br] = b.split(',').map(Number);
+    return (Math.abs(aq - bq) + Math.abs(ar - br) + Math.abs(aq + ar - bq - br)) / 2;
+  };
+  let battle;
+  for (let step = 0; step < 60; step++) {
+    const { state, ui, legal } = await inspect(page);
+    if (ui.controls.reaction_decline) { await clickControl(page, 'reaction_decline'); continue; }
+    if (state.phase === 'planning') {
+      for (const id of Object.keys(state.heroes)) await clickControl(page, `ready_${id}`);
+    } else if (['world', 'initiative', 'bonus', 'resolution'].includes(state.phase)) {
+      await clickControl(page, 'advance');
+    } else {
+      const actor = state.initiative_order[state.current_actor_index];
+      const targets = Object.entries(legal.attack?.targets || {});
+      const target = targets.find(([, candidate]) => candidate.kind === 'hero');
+      if (target) {
+        await clickControl(page, 'attack');
+        await clickHex(page, target[1].hex);
+        battle = { attacker: actor, defender: target[0], stateBefore: state };
+        break;
+      }
+      const hero = state.heroes[actor];
+      const rivals = Object.values(state.heroes).filter(other => other.id !== actor).sort((a, b) => distance(hero.hex, a.hex) - distance(hero.hex, b.hex));
+      const options = Object.keys(legal.move?.targets || {}).sort((a, b) => distance(a, rivals[0].hex) - distance(b, rivals[0].hex) || a.localeCompare(b));
+      const command = options.length ? { type: 'move', player_id: actor, target: options[0] } : { type: 'pass', player_id: actor };
+      const result = await page.evaluate(command => window.realm.command(command), command);
+      expect(result.is_valid).toBe(true);
+    }
+  }
+  expect(battle, 'reachable ordinary commands should produce an adjacent hero combat').toBeTruthy();
+  for (let step = 0; step < 4; step++) {
+    const { ui } = await inspect(page);
+    if (!ui.controls.reaction_decline) break;
+    await clickControl(page, 'reaction_decline');
+  }
+  await clickControl(page, 'handoff');
+  const beforeFirstChoice = await inspect(page);
+  expect(beforeFirstChoice.ui.decision_player).toBe(battle.attacker);
+  await clickControl(page, 'stance_assault');
+  let snapshot = await inspect(page);
+  expect(snapshot.state.pending_combat.stage).toBe('stances');
+  expect(snapshot.state.events.filter(event => event.type === 'StancesRevealed')).toHaveLength(0);
+  expect(snapshot.ui.journal).not.toContain('Stances revealed');
+  await clickControl(page, 'handoff');
+  expect((await inspect(page)).ui.decision_player).toBe(battle.defender);
+  await clickControl(page, 'stance_guard');
+  snapshot = await inspect(page);
+  expect(snapshot.state.pending_combat.stage).toBe('fate_attacker');
+  expect(snapshot.ui.decision_player).toBe(battle.attacker);
+  expect(snapshot.ui.journal).toContain('Stances revealed');
+  const beforeFate = snapshot.state.heroes[battle.attacker].fate;
+  await clickControl(page, 'reroll');
+  snapshot = await inspect(page);
+  expect(snapshot.state.heroes[battle.attacker].fate).toBe(beforeFate - 1);
+  expect(snapshot.ui.decision_player).toBe(battle.defender);
+  await page.screenshot({ path: testInfo.outputPath('combat-revealed-1280.png') });
+  await clickControl(page, 'decline_fate');
+  snapshot = await inspect(page);
+  const displacement = Object.keys(snapshot.ui.controls).find(id => id.startsWith('displace_'));
+  if (displacement) await clickControl(page, displacement);
+  snapshot = await inspect(page);
+  expect(Object.keys(snapshot.state.pending_combat || {})).toHaveLength(0);
+  const resolved = snapshot.state.events.filter(event => event.type === 'CombatResolved');
+  expect(resolved).toHaveLength(1);
+  expect(snapshot.ui.journal).toContain('Combat resolved');
+  expect(errors).toEqual([]);
+});
