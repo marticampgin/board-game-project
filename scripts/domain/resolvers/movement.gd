@@ -21,7 +21,7 @@ static func road_lookup(map: Dictionary) -> Dictionary:
 			result[road_key(edge[0], edge[1])] = true
 	return result
 
-static func reachable(map: Dictionary, heroes: Dictionary, hero_id: String) -> Dictionary:
+static func reachable(map: Dictionary, heroes: Dictionary, hero_id: String, options: Dictionary = {}) -> Dictionary:
 	if not heroes.has(hero_id):
 		return {}
 	var hero: Dictionary = heroes[hero_id]
@@ -31,13 +31,13 @@ static func reachable(map: Dictionary, heroes: Dictionary, hero_id: String) -> D
 		if other_id != hero_id:
 			occupied[heroes[other_id].hex] = true
 	var roads := road_lookup(map)
-	var frontier: Array[Dictionary] = [{"hex": start, "cost": 0, "path": [start], "road_only": true}]
-	var best: Dictionary = {start + "|road": 0}
+	var frontier: Array[Dictionary] = [{"hex": start, "cost": 0, "path": [start], "road_only": true, "ignored_penalty": false, "ignored_terrain": "", "ignored_hex": ""}]
+	var best: Dictionary = {start + "|road|available": 0}
 	var result: Dictionary = {}
 	while not frontier.is_empty():
 		frontier.sort_custom(_node_less)
 		var current: Dictionary = frontier.pop_front()
-		var state_key := str(current.hex) + ("|road" if current.road_only else "|mixed")
+		var state_key := _state_key(current)
 		if int(current.cost) != int(best[state_key]):
 			continue
 		if current.hex != start and map.hexes[current.hex].terrain == "swamp":
@@ -50,30 +50,43 @@ static func reachable(map: Dictionary, heroes: Dictionary, hero_id: String) -> D
 			var budget := 4 if road_only else int(hero.get("move", 3))
 			var terrain: String = map.hexes[neighbor].terrain
 			var step := 1 if on_road or terrain != "forest" or hero.get("class_id", "") == "ranger" else 2
-			var cost: int = int(current.cost) + step
-			if terrain == "swamp":
-				# Roads never permit traversing a swamp within the same Move.
-				cost = maxi(int(current.cost) + 1, budget)
-			if cost > budget:
-				continue
-			var next_key: String = neighbor + ("|road" if road_only else "|mixed")
-			if best.has(next_key) and int(best[next_key]) <= cost:
-				continue
-			best[next_key] = cost
-			var path: Array = current.path.duplicate()
-			path.append(neighbor)
-			var next := {"hex": neighbor, "cost": cost, "path": path, "road_only": road_only}
-			frontier.append(next)
-			if neighbor != start and (not result.has(neighbor) or cost < int(result[neighbor].cost)):
-				result[neighbor] = {"cost": cost, "path": path, "road_only": road_only}
+			var choices: Array[bool] = [false]
+			if options.get("forced_march", false) and not current.ignored_penalty and (step > 1 or terrain == "swamp"):
+				choices.append(true)
+			for ignore_now in choices:
+				var cost: int = int(current.cost) + (1 if ignore_now else step)
+				if terrain == "swamp" and not ignore_now:
+					# Neither roads nor Forced March remove the mandatory swamp stop.
+					cost = maxi(int(current.cost) + 1, budget)
+				if cost > budget:
+					continue
+				var path: Array = current.path.duplicate()
+				path.append(neighbor)
+				var next := {"hex": neighbor, "cost": cost, "path": path, "road_only": road_only,
+					"ignored_penalty": current.ignored_penalty or ignore_now,
+					"ignored_terrain": terrain if ignore_now else current.ignored_terrain,
+					"ignored_hex": neighbor if ignore_now else current.ignored_hex}
+				var next_key := _state_key(next)
+				if best.has(next_key) and int(best[next_key]) <= cost:
+					continue
+				best[next_key] = cost
+				frontier.append(next)
+				if neighbor != start and (not result.has(neighbor) or cost < int(result[neighbor].cost)):
+					result[neighbor] = {"cost": cost, "path": path, "road_only": road_only,
+						"ignored_penalty": next.ignored_penalty, "ignored_terrain": next.ignored_terrain, "ignored_hex": next.ignored_hex}
 	return result
+
+static func _state_key(node: Dictionary) -> String:
+	return str(node.hex) + ("|road" if node.road_only else "|mixed") + ("|used" if node.ignored_penalty else "|available")
 
 static func _node_less(a: Dictionary, b: Dictionary) -> bool:
 	if a.cost != b.cost:
 		return a.cost < b.cost
 	if a.hex != b.hex:
 		return a.hex < b.hex
-	return bool(a.road_only) and not bool(b.road_only)
+	if a.road_only != b.road_only:
+		return bool(a.road_only) and not bool(b.road_only)
+	return not a.get("ignored_penalty", false) and b.get("ignored_penalty", false)
 
 static func travel_costs(map: Dictionary, start: String) -> Dictionary:
 	if not is_walkable(map, start):

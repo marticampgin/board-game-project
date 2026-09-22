@@ -10,6 +10,7 @@ func run() -> Array[String]:
 	_test_hex()
 	_test_rng()
 	_test_movement()
+	_test_forced_march()
 	_test_generation()
 	return errors
 
@@ -101,6 +102,32 @@ func _test_movement() -> void:
 		map.hexes[value] = {"terrain": "plains"}
 	reached = Movement.reachable(map, heroes, "p1")
 	_expect(reached.has("4,-1") and reached["4,-1"].road_only, "Road state survives an equal-cost mixed arrival at a junction")
+
+func _test_forced_march() -> void:
+	var map := _line_map()
+	var heroes := {"p1": {"hex": "0,0", "move": 3, "class_id": "warlord"}}
+	map.hexes["1,0"].terrain = "forest"
+	var ordinary := Movement.reachable(map, heroes, "p1")
+	var marched := Movement.reachable(map, heroes, "p1", {"forced_march": true})
+	_expect(not ordinary.has("3,0") and marched.has("3,0"), "Forced March ignores one forest movement penalty")
+	_expect(marched["3,0"].cost == 3 and marched["3,0"].ignored_penalty and marched["3,0"].ignored_hex == "1,0", "Forced March logs its exact waived terrain")
+	map.hexes["2,0"].terrain = "forest"
+	marched = Movement.reachable(map, heroes, "p1", {"forced_march": true})
+	_expect(marched.has("2,0") and not marched.has("3,0"), "Forced March cannot waive two difficult-terrain penalties")
+	map.hexes["1,0"].terrain = "swamp"
+	map.hexes["2,0"].terrain = "plains"
+	marched = Movement.reachable(map, heroes, "p1", {"forced_march": true})
+	_expect(marched["1,0"].cost == 1 and not marched.has("2,0"), "Forced March may waive swamp cost but must still stop")
+	map.hexes["1,0"].terrain = "forest"
+	map.roads = [["0,0", "1,0"], ["1,0", "2,0"]]
+	marched = Movement.reachable(map, heroes, "p1", {"forced_march": true})
+	_expect(not marched["2,0"].ignored_penalty, "A road already bypasses forest cost without spending terrain waiver")
+	_expect(ordinary == Movement.reachable(_ordinary_forest_map(), heroes, "p1"), "Optional Forced March queries do not mutate ordinary movement")
+
+func _ordinary_forest_map() -> Dictionary:
+	var map := _line_map()
+	map.hexes["1,0"].terrain = "forest"
+	return map
 
 func _test_generation() -> void:
 	var first := Generator.generate(1)
