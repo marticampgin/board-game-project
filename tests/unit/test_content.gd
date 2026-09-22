@@ -12,6 +12,7 @@ func run() -> Array[String]:
 	_test_equipment()
 	_test_equipment_movement()
 	_test_world_events()
+	_test_world_restore_order()
 	_test_exploration()
 	_test_hints()
 	return errors
@@ -148,6 +149,27 @@ func _test_world_events() -> void:
 				_check(not game.state.data.market_hex.is_empty() and not game._is_occupied(game.state.data.market_hex), "Wandering Market selects neutral unoccupied ground")
 				World.resolution_expiry(game)
 				_check(game.state.data.market_hex.is_empty(), "Wandering Market ends at Resolution")
+
+func _test_world_restore_order() -> void:
+	# JSON restoration canonicalizes Dictionary order; event arrays must remain
+	# identical to a fresh process, including every affected hex and target draw.
+	for event_id: String in ["collapsed_bridge", "unstable_leyline", "monster_migration", "cursed_ground", "wandering_market"]:
+		var fresh: RefCounted = Rules.new(20260922)
+		var restored: RefCounted = Rules.from_snapshot(JSON.parse_string(fresh.state.to_json()))
+		_check(restored != null, "Fresh world fixture restores for " + event_id)
+		if restored == null: continue
+		fresh.state.data.round_number = 2
+		restored.state.data.round_number = 2
+		World.apply_event(fresh, event_id)
+		World.apply_event(restored, event_id)
+		_check(fresh.checksum() == restored.checksum() and fresh._rng.snapshot() == restored._rng.snapshot(), "World target, audit arrays and state survive Dictionary reordering: " + event_id)
+		fresh.state.data.round_number = 4
+		restored.state.data.round_number = 4
+		World.resolution_expiry(fresh)
+		World.resolution_expiry(restored)
+		World._expire(fresh, "world")
+		World._expire(restored, "world")
+		_check(fresh.checksum() == restored.checksum(), "World expiry survives Dictionary reordering: " + event_id)
 
 func _at_ruin(game: RefCounted, player_id: String, location_id: String = "ruin_1") -> void:
 	game.state.data.heroes[player_id].hex = game.state.data.map.locations[location_id].hex

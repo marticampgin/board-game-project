@@ -172,4 +172,6 @@ static func update_hints(game: RefCounted, player_id: String) -> void:
 		game._emit("OccultSenseChanged", player_id, hint.duplicate(true), "owner_only")
 
 static func _update_all_hints(game: RefCounted) -> void:
-	for player_id: String in game.state.data.heroes: update_hints(game, player_id)
+	var ids: Array = game.state.data.heroes.keys()
+	ids.sort()
+	for player_id: String in ids: update_hints(game, player_id)

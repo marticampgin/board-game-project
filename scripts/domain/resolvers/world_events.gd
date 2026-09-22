@@ -87,7 +87,7 @@ static func apply_event(game: RefCounted, event_id: String) -> bool:
 			effect.expiry = "permanent"
 		"cursed_ground":
 			var changed: Array[String] = []
-			for value: String in game.state.data.map.hexes:
+			for value: String in Hex.sort_keys(game.state.data.map.hexes.keys()):
 				var tile: Dictionary = game.state.data.map.hexes[value]
 				if tile.region == target and tile.terrain == "plains":
 					tile.movement_terrain = "forest"
@@ -144,6 +144,7 @@ static func _candidates(game: RefCounted, event_id: String) -> Array:
 				for value: String in map.hexes:
 					if Movement.is_walkable(map, value) and not connected.has(value): valid = false
 				if valid and not _alternate_path(trial, edge[0], edge[1]).is_empty(): result.append(edge.duplicate())
+			result.sort_custom(func(a: Array, b: Array) -> bool: return Movement.road_key(a[0], a[1]) < Movement.road_key(b[0], b[1]))
 		"unstable_leyline":
 			for id: String in map.locations:
 				if map.locations[id].kind in ["minor_tower", "ancient_tower", "worldspire"]: result.append(id)
