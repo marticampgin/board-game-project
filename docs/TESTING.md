@@ -8,6 +8,8 @@ Use Godot **4.7.2 stable Standard**, Node.js 20+, and `npm install`. Set `GODOT_
 npm run check
 npm run test:headless
 npm run test:cli
+npm run test:network
+npm run test:network-ui
 npm test
 npm run test:headless -- --suite bots
 ```
@@ -18,7 +20,7 @@ Direct engine invocation is also supported:
 Godot_v4.7.2-stable_win64_console.exe --headless --path . --script res://tests/run_tests.gd
 ```
 
-No Godot test addon is required. Each suite returns failure messages, and the runner prints a summary and exits 0 on success or 1 on any failure. Optional suite IDs are `hex`, `rules`, `combat`, `milestone2`, `milestone3`, `content`, `persistence`, `acceptance`, `bots`, `victory_routes`, and `complete_matches`. Long suites stream progress by seed. Verify the deliberate failure path with the following command; **exit 1 is expected**:
+No Godot test addon is required. Each suite returns failure messages, and the runner prints a summary and exits 0 on success or 1 on any failure. Optional suite IDs are `hex`, `rules`, `combat`, `milestone2`, `milestone3`, `content`, `network`, `persistence`, `acceptance`, `bots`, `victory_routes`, and `complete_matches`. Long suites stream progress by seed. Verify the deliberate failure path with the following command; **exit 1 is expected**:
 
 ```powershell
 npm run test:headless -- --suite combat --self-test-failure
@@ -35,14 +37,19 @@ npm run test:headless -- --suite combat --self-test-failure
 | `tests/unit/test_milestone3.gd` | Trade/networks/purchases, class Fate triggers, claims before/after income, immediate cancellation, ritual completion/cancellation and shared victories |
 | `tests/unit/test_content.gd` | Five world events and expiry, four Relic sources, seeded reward alternatives, Dark Bargain, exploration affinity, hints and equipment effects |
 | `tests/unit/test_persistence.gd` | Atomic envelope saves, backup rotation, metadata and schema validation |
+| `tests/unit/test_network.gd` | Authorized projections/checksums/private history, command gate purity, independent per-seat deadlines and safe defaults |
 | `tests/integration/test_acceptance.gd` | All seven phases across three rounds, every hero moves, capture and exact income, no duplicate scheduled actions, seed regeneration, full replay/event equivalence, JSON restore and RNG continuation before every command |
 | `tests/integration/test_bots.gd` | Four bots reach twenty rounds or legitimate earlier victory, with no lost/duplicate scheduled actions, legal deterministic policy, pending-decision save/load, RNG continuation and replay |
 | `tests/integration/test_victory_routes.gd` | Each of the three victory routes from a fresh generated game using only legal commands; other seats legally Pass, with no injected resources or winner |
 | `tests/integration/test_complete_matches.gd` | Twenty-five fresh matches with four active bots, real victories within forty rounds, replay/JSON checksums and a persisted seed/route/resource report |
 | `tests/integration/cli.test.mjs` | Real headless process adapter, persisted state and backup, all conflict command aliases, rejected command purity, command file input, three-round simulation, replay checksum, filtered JSONL logs and process exit status |
+| `tests/integration/network.test.mjs` | Real ENet host and two separate native clients, seeded checksums, remote Move/full combat, sealed plan/stance packets, forged-seat/stale-version/stale-sequence purity, planning/reaction timeouts, reconnect snapshot and sequence continuation, detailed host audit |
+| `tests/presentation/network_ui_smoke.gd` | Actual native Main/lobby/read-only adapter in three processes, multiplayer phase and action controls, permissions, rendered heroes and filtered state |
 | `tests/browser/` | Real Godot web export, UI interaction and layout smoke checks through Playwright |
 
 The complete-match report is written to `artifacts/bot_matches.json`. The Milestone 3 run completed all 25 seeds (1–25), with a median of 6 rounds: 15 Ascension, 10 Dominion, and no stalls (maximum 12 rounds). Every round restores canonical JSON before continuing, and every completed match independently replays its accepted history. These are regression results from a simple deterministic policy, not a balance or match-length claim. The separate fresh-game proofs reached Conquest in round 7, Dominion in round 6, and Ascension in round 5 for seed `20260922`.
+
+The native network acceptance report is `artifacts/network_acceptance.json`; captured recipient observations/results are `artifacts/network_peer_*.jsonl`. Reconnect tokens are redacted from exported test journals. The test starts fresh seed `20260922`, moves remote heroes using reported legal targets, and resolves a real player duel without modifying authoritative state. Timeouts use the service's deterministic elapsed-time tick. `npm test` runs the headless, CLI and native network acceptance suites. `test:network-ui` separately loads the native presentation, while Playwright verifies the browser export.
 
 ## CLI playbook
 
@@ -131,6 +138,31 @@ npm run cli -- logs --rejected
 Readable output groups command status, actor, round/phase, decision-window stage, state versions and before/after hashes with the emitted event sequence. JSONL retains the full submitted command, rejection reason, source (`ui`, `cli`, or `bot`), UTC timestamp, elapsed microseconds, before/after RNG snapshots, and full event payloads including combat calculations. Actor/event/rejection filters make individual interactions easy to inspect. Native UI uses the same logger under Godot's `user://logs/` directory and displays recent events in the HUD.
 
 For a reproducible bug, retain the seed, save, command JSON and relevant action-log lines. Compare before/after checksums: rejected actions must have identical hashes. `replay` checks accepted history against the final saved checksum; timestamp and duration metadata never affect replay.
+
+## Native host/join from the terminal
+
+Run each long-lived peer in a separate terminal; these invoke the same `NetworkSession` service as the native UI:
+
+```powershell
+npm run net -- host --port 24567 --seed 20260922 --session .realm/host
+npm run net -- join --address 127.0.0.1 --port 24567 --session .realm/p2
+npm run net -- join --address 127.0.0.1 --port 24567 --session .realm/p3
+```
+
+Enter `{"op":"start"}` in the host terminal. Each client accepts one ordinary command JSON per line, for example `{"type":"ready"}`; its own player ID, sequence and state version are supplied automatically. Host automatically advances public phases and drives bot seats. `--manual` disables automatic phase/bot actions for controlled experiments. Outside the peer terminals:
+
+```powershell
+npm run net -- send --session .realm/host --op start
+npm run net -- send --session .realm/p2 --command '{"type":"ready","player_id":"p2"}'
+npm run net -- inspect --session .realm/p2
+npm run net -- logs --session .realm/host --limit 20
+npm run net -- logs --session .realm/p2 --json
+npm run net -- join --address 127.0.0.1 --port 24567 --token TOKEN --session .realm/p2-reconnected
+```
+
+Use either start method once. `inspect` exposes only that seat's authorized observation and legal options. Reconnect uses the token stored in that client's `credentials.json`; the host must still be running. `network.jsonl` records local observation/result delivery and control requests, `observation.json` retains the latest authorized view, and the host's `actions.jsonl` contains the complete authoritative audit including protocol rejections. `send --file request.json` accepts an explicit control request such as `{"op":"submit","command":{"type":"move","target":"0,1"}}`. `--host` and `--join` also work as mode aliases. Ctrl+C closes a terminal peer.
+
+The native proof uses direct-address UDP/ENet. Browser networking, matchmaking, NAT traversal, accounts and host migration are outside scope. Client observations intentionally omit the authoritative seed/RNG/history and cannot be loaded as game saves.
 
 ## Browser checks
 

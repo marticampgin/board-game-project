@@ -83,3 +83,7 @@ Effects have explicit expiry events; they never remove a scheduled action.
 - **Ascension:** carry at least three Relics on Worldspire. Begin Ritual, then Complete Ritual on the next scheduled action. Leaving, displacement, downing, losing requirements or choosing another action cancels the ritual. Completion wins immediately.
 
 New Conquest/Dominion claims never win during the Resolution that creates them. Existing claims are verified before new income. Exact simultaneous qualifying claims use the documented shared-victory fallback. There is no normal match round limit; automated simulations stop at 40 and report a stall instead of inventing a winner.
+
+## Native multiplayer decisions
+
+The host validates every intent and owns gameplay dice. Each connected player controls only their assigned seat. Private plans and unrevealed stances remain off other clients' wire data; public trap warnings remain visible. The default online planning deadline is 60 seconds, optional-decision deadline 20 seconds, and action fallback 90 seconds. Timeouts choose no-change Ready, Decline, Guard for an unsubmitted stance, or safe Pass as applicable. Disconnected seats temporarily use the simple bot; a reconnect token returns control of the reserved seat while the host remains active. Local/solo games have no network deadline.

@@ -12,6 +12,7 @@ const Milestone3Tests = preload("res://tests/unit/test_milestone3.gd")
 const VictoryRouteTests = preload("res://tests/integration/test_victory_routes.gd")
 const CompleteMatchTests = preload("res://tests/integration/test_complete_matches.gd")
 const ContentTests = preload("res://tests/unit/test_content.gd")
+const NetworkTests = preload("res://tests/unit/test_network.gd")
 
 func _initialize() -> void:
 	var failures: Array[String] = []
@@ -30,6 +31,7 @@ func _initialize() -> void:
 		{"id": "persistence", "name": "atomic snapshots and recovery", "script": PersistenceTests},
 		{"id": "milestone3", "name": "economy, equipment and victory timing", "script": Milestone3Tests},
 		{"id": "content", "name": "world events, exploration rewards and equipment", "script": ContentTests},
+		{"id": "network", "name": "network projection, command gate and deadlines", "script": NetworkTests},
 		{"id": "acceptance", "name": "three-round vertical slice and replay", "script": AcceptanceTests},
 		{"id": "bots", "name": "20-round four-bot conflict or victory and replay", "script": BotTests},
 		{"id": "victory_routes", "name": "fresh-command proof of all three victory routes", "script": VictoryRouteTests},

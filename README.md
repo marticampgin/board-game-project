@@ -1,8 +1,8 @@
 # Shattered Realm
 
-A deterministic four-seat local board-game prototype built from [the master specification](shattered_realm_codex_master_spec.md). The complete local loop covers **Milestones 0–3**: seeded hex board, simultaneous planning, initiative, two action cycles, combat, Fate, class abilities, exploration, settlement economy, equipment, world events, and three visible victory routes.
+A deterministic four-seat board-game prototype built from [the master specification](shattered_realm_codex_master_spec.md). **Milestones 0–5** cover the complete local game, readable 3D presentation, and a native ENet multiplayer proof: seeded hex board, simultaneous planning, initiative, two action cycles, combat, Fate, class abilities, exploration, settlement economy, equipment, world events, and three visible victory routes.
 
-Conquest and Dominion claims must survive a response round; Ascension requires a public two-action ritual. Twenty-five deterministic four-bot matches finish through the real command pipeline, and each victory route has a separate fresh-game command proof. Presentation polish and the network proof follow the local-game checkpoint.
+Conquest and Dominion claims must survive a response round; Ascension requires a public two-action ritual. Twenty-five deterministic four-bot matches finish through the real command pipeline, and each victory route has a separate fresh-game command proof. Local control, one human with three bots, and native host/join use the same authoritative rules.
 
 ## Run
 
@@ -27,6 +27,8 @@ Godot_v4.7.2-stable_win64_console.exe --headless --path . --export-debug "Window
 
 The game uses primitive 3D terrain, roads, landmarks and heroes; no art downloads or Godot addons are needed. Compatibility rendering supports desktop and the browser smoke build. Enter a seed, choose local control or one human with three bots, submit preparations/purchases, ready the seats, reveal initiative, and act through both cycles. Combat opens participant stance and Fate windows; eligible reactions prompt their owner. Watch public victory claims and rituals. Manual save/load and rotating autosave retain pending decisions and RNG.
 
+Scroll or `+`/`-` zooms, middle-drag or `Q`/`E` rotates, `WASD` pans, and `F`/Home focuses the acting hero. Green destinations, red attack targets, ownership banners, capture/ritual markers and world-event overlays show tactical state. Animation speed and reduced motion are configurable. Native rendering measurements and their scope are recorded in [performance notes](docs/PERFORMANCE.md).
+
 ## Exercise the actual rules from a terminal
 
 ```powershell
@@ -46,18 +48,32 @@ Every implemented action and decision has a CLI command, including `trade`, `exp
 
 UI, CLI, scripted simulation, tests, and replay call the same GDScript rules. No game rules are duplicated in JavaScript.
 
+## Native multiplayer
+
+Open **Online** in the native game. One player hosts on port `24567`; other instances join its address. The host starts after seats connect. Unclaimed or disconnected seats use temporary bots; a seat's reconnect token restores its authorized snapshot. The browser export supports local/solo play; ENet runs in the native build.
+
+The same service has terminal host/join controls:
+
+```powershell
+npm run net -- host --port 24567 --session .realm/host
+npm run net -- join --address 127.0.0.1 --port 24567 --session .realm/client
+```
+
+Use separate terminals. Enter `{"op":"start"}` in the host terminal; connected clients can enter ordinary command JSON such as `{"type":"ready"}`. `npm run net -- inspect --session .realm/client` prints the current authorized state and legal actions. `npm run net -- logs --session .realm/host` shows the session journal. This is a direct-address networking proof; matchmaking, relay/NAT traversal and accounts are outside its scope.
+
 ## Verify
 
 ```powershell
 npm run check
 npm test
+npm run test:network-ui
 npm run build:web
 npm run test:e2e
 ```
 
 The browser build needs the matching Godot export templates. Install Playwright's browser once with `npx playwright install chromium`. Test artifacts and generated builds are ignored by Git.
 
-Headless checks cover 100 map seeds, movement/income acceptance, all sixteen stance pairings, combat/Fate/reaction timing, recovery, tower commitments, equipment/economy, victory response windows, and 25 complete four-bot matches. Replay and JSON continuation compare state, events and RNG, including pending decisions. CLI tests verify persistence, all action aliases, structured logs, process status, and the test runner's intentional failure path. Browser tests exercise the actual exported Godot game. Detailed simulation results are written to `artifacts/bot_matches.json`.
+Headless checks cover 100 map seeds, movement/income acceptance, all sixteen stance pairings, combat/Fate/reaction timing, recovery, tower commitments, equipment/economy, victory response windows, and 25 complete four-bot matches. Replay and JSON continuation compare state, events and RNG, including pending decisions. CLI tests verify persistence, all action aliases, logs and process status. Real separate-process ENet tests verify authority, hidden decisions, timeouts and reconnect; the native UI smoke exercises the actual multiplayer screens. Playwright tests exercise the actual exported Godot game. Reports are written to `artifacts/bot_matches.json` and `artifacts/network_acceptance.json`.
 
 ## Project guide
 
