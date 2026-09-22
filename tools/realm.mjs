@@ -151,6 +151,7 @@ async function main() {
     const result = spawnSync(findGodot(), ['--headless', '--path', projectRoot, '--script', 'res://tools/game_cli.gd', '--', requestPath, responsePath], { cwd: projectRoot, windowsHide: true, encoding: 'utf8', timeout: 120000, maxBuffer: 8 * 1024 * 1024 });
     if (result.error) throw result.error;
     if (result.status !== 0) throw new Error(`Godot CLI exited ${result.status}:\n${result.stderr}\n${result.stdout}`);
+    if (/(?:SCRIPT ERROR:|\bERROR:)/.test(`${result.stdout}\n${result.stderr}`)) throw new Error(`Godot reported an engine or script error:\n${result.stderr}\n${result.stdout}`);
     let response;
     try { response = JSON.parse(await readFile(responsePath, 'utf8')); }
     catch (error) { throw new Error(`Godot did not write a valid response: ${error.message}\n${result.stderr}\n${result.stdout}`); }
