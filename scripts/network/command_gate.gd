@@ -12,7 +12,12 @@ static func check(player_id: String, last_sequence: int, sequence: int, command:
 		return _reject("NETWORK_MALFORMED", "Command exceeds the supported data envelope", next)
 	if command.get("type", "") == "advance": return _reject("NETWORK_HOST_ONLY", "The host advances shared phases", next)
 	if command.get("player_id", "") != player_id: return _reject("NETWORK_SEAT", "A client may only act for its assigned seat", next)
-	if not command.has("expected_version") or not command.expected_version is int:
+	if not command.has("expected_version"):
+		return _reject("NETWORK_VERSION_REQUIRED", "An integer expected_version is required", next)
+	# JSON decoders represent whole-number values as floats. Preserve the same
+	# numeric semantics as domain validation without coercing strings/fractions.
+	var version: Variant = command.expected_version
+	if not (version is int or (version is float and is_finite(version) and version == floor(version))):
 		return _reject("NETWORK_VERSION_REQUIRED", "An integer expected_version is required", next)
 	return {"is_valid": true, "reason_code": "OK", "message": "Intent authenticated", "next_sequence": next}
 

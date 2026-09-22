@@ -93,6 +93,12 @@ func _test_sealed_combat() -> void:
 func _test_protocol_gate() -> void:
 	var command: Dictionary = {"type": "pass", "player_id": "p2", "expected_version": 17}
 	_check(Gate.check("p2", 0, 1, command, true).is_valid, "Authenticated own-seat command should reach domain validation")
+	var json_command: Dictionary = JSON.parse_string(JSON.stringify(command))
+	_check(json_command.expected_version is float and Gate.check("p2", 0, 1, json_command, true).is_valid, "Explicit whole-number versions decoded from JSON must reach domain validation")
+	for invalid_version: Variant in [17.5, INF, -INF, NAN, true]:
+		var malformed: Dictionary = command.duplicate()
+		malformed.expected_version = invalid_version
+		_check(not Gate.check("p2", 0, 1, malformed, true).is_valid, "Fractional, nonfinite and boolean versions must reject: " + str(invalid_version))
 	var duplicate: Dictionary = Gate.check("p2", 1, 1, command, true)
 	_check(not duplicate.is_valid and duplicate.next_sequence == 2, "Duplicate sequence must reject without consuming another sequence")
 	var skipped: Dictionary = Gate.check("p2", 1, 4, command, true)
