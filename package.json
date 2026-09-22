@@ -1,0 +1,20 @@
+{
+  "name": "shattered-realm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Godot 4.7.2 deterministic board-game prototype and development tools",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node tools/godot.mjs play",
+    "check": "node tools/godot.mjs check",
+    "test": "npm run test:headless && npm run test:cli",
+    "test:headless": "node tools/godot.mjs test",
+    "test:cli": "node --test tests/integration/cli.test.mjs",
+    "cli": "node tools/realm.mjs",
+    "build:web": "node tools/build_web.mjs",
+    "serve:web": "node tools/serve_web.mjs",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": { "@playwright/test": "1.63.0" }
+}
