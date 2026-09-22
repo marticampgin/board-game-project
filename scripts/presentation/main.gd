@@ -221,7 +221,7 @@ func _build_ui() -> void:
 	body.add_child(left)
 	left.add_child(_label("THE FOUR FACTIONS", 12, MUTED))
 	cards = VBoxContainer.new()
-	cards.add_theme_constant_override("separation", 6)
+	cards.add_theme_constant_override("separation", 4)
 	cards.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var card_scroll := ScrollContainer.new()
 	card_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -428,6 +428,8 @@ func _build_decision_ui() -> void:
 	stack.add_child(_label("Pass control to this player.\nStances stay sealed until both players have chosen.", 15, MUTED))
 	stack.add_child(_button("handoff", "I am ready to choose", func() -> void:
 		decision_ack = pending_handoff_key
+		var decision_owner: String = _decision_player()
+		if not decision_owner.is_empty(): viewer = decision_owner
 		handoff.hide()
 		_refresh()))
 	planning_dialog = ConfirmationDialog.new()
@@ -526,12 +528,14 @@ func _build_settings() -> void:
 	stack.add_child(hints)
 	stack.add_child(_label("Animation speed", 14, MUTED))
 	var speed := OptionButton.new()
+	buttons.settings_speed = speed
 	for title_value: String in ["Relaxed · 0.5×", "Normal · 1×", "Fast · 2×"]: speed.add_item(title_value)
 	speed.selected = [0.5, 1.0, 2.0].find(preferences.values.animation_speed)
 	speed.item_selected.connect(func(index: int) -> void: preferences.set_value("animation_speed", [0.5, 1.0, 2.0][index]); _apply_preferences())
 	stack.add_child(speed)
 	stack.add_child(_label("Interface scale", 14, MUTED))
 	var scale_choice := OptionButton.new()
+	buttons.settings_scale = scale_choice
 	for title_value: String in ["Compact · 85%", "Standard · 100%", "Large · 115% (1600×900 recommended)"]: scale_choice.add_item(title_value)
 	scale_choice.selected = [0.85, 1.0, 1.15].find(preferences.values.ui_scale)
 	scale_choice.item_selected.connect(func(index: int) -> void: preferences.set_value("ui_scale", [0.85, 1.0, 1.15][index]); _apply_preferences())
@@ -880,10 +884,10 @@ func _refresh_cards() -> void:
 	for id: String in state.heroes:
 		var hero: Dictionary = state.heroes[id]
 		var color: Color = Board.TEAM[int(id.substr(1)) - 1]
-		var panel := _panel(Color("263d42") if viewer == id else Color("1a2f37"), 5)
+		var panel := _panel(Color("263d42") if viewer == id else Color("1a2f37"), 4)
 		cards.add_child(panel)
 		var stack := VBoxContainer.new()
-		stack.add_theme_constant_override("separation", 1)
+		stack.add_theme_constant_override("separation", 0)
 		panel.add_child(stack)
 		var select := _button("seat_" + id, "%s   %s%s" % [id.to_upper(), hero.name, "  *" if rules.current_actor() == id else ""], func() -> void:
 			if local_mode not in ["solo", "network"]: viewer = id
@@ -895,8 +899,8 @@ func _refresh_cards() -> void:
 		select.add_theme_font_size_override("font_size", 14)
 		for style_name in ["normal", "hover", "pressed", "focus"]:
 			var style: StyleBoxFlat = theme.get_stylebox(style_name, "Button").duplicate()
-			style.content_margin_top = 3
-			style.content_margin_bottom = 3
+			style.content_margin_top = 2
+			style.content_margin_bottom = 2
 			select.add_theme_stylebox_override(style_name, style)
 		select.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		stack.add_child(select)
@@ -1067,10 +1071,11 @@ func _refresh_selection() -> void:
 	var location_id: String = tile.get("location_id", "")
 	if not location_id.is_empty():
 		var location: Dictionary = state.map.locations[location_id]
-		var visible: bool = location.kind in ["worldspire", "ancient_tower"] or viewer in location.get("discovered_by", [])
+		var discovered: bool = viewer in location.get("discovered_by", [])
+		var visible: bool = location.kind in ["worldspire", "ancient_tower"] or not String(location.owner_id).is_empty() or discovered
 		if visible:
 			value += "\n[b]%s[/b]\n%s · Level %d\nOwner: %s" % [location.name, String(location.kind).replace("_", " ").capitalize(), location.level, location.owner_id if not String(location.owner_id).is_empty() else "Neutral"]
-			if rules.definitions.tower_traits.has(location.get("trait", "")):
+			if discovered and rules.definitions.tower_traits.has(location.get("trait", "")):
 				var trait_definition: Dictionary = rules.definitions.tower_traits[location.trait]
 				value += "\n[color=#dec18a]%s[/color]: %s" % [trait_definition.name, trait_definition.description]
 			if location.get("exhausted", false): value += "\nExplored · no rewards remain."
@@ -1103,8 +1108,9 @@ func _refresh_journal() -> void:
 	for index in range(maxi(0, events.size() - 90), events.size()):
 		var event: Dictionary = events[index]
 		if event.get("visibility", "public") != "public": continue
+		if event.type in ["WorldEventSelected", "WorldEventResolved"]: continue
 		if journal_filter == "actions" and event.type not in ["ActionStarted", "HeroMoved", "LocationCaptured", "ActionPassed"]: continue
-		if journal_filter == "economy" and event.type not in ["IncomeGranted", "FateGained", "LocationCaptured"]: continue
+		if journal_filter == "economy" and event.type not in ["IncomeGranted", "FateGained", "LocationCaptured", "TradeCompleted", "EquipmentPurchased", "RuinExplored", "RelicCollected"]: continue
 		var description: String = _event_description(event)
 		lines.append("[color=#7e9a9a]#%03d · R%d[/color]  %s\n%s" % [event.sequence, event.round, event.actor_id.to_upper(), description])
 	log_text.text = "\n\n".join(lines)
@@ -1114,7 +1120,24 @@ func _event_description(event: Dictionary) -> String:
 	match event.type:
 		"HeroMoved": return "Moved %s > %s" % [data.get("from", ""), data.get("to", data.get("target", ""))]
 		"PhaseChanged": return "[color=#dec18a]%s[/color]" % String(data.get("phase", data.get("to", "Phase advanced"))).replace("_", " ").capitalize()
-		"IncomeGranted": return "[color=#a3ceb2]Income[/color]  " + JSON.stringify(data)
+		"IncomeGranted": return "[color=#a3ceb2]Income[/color] · +%s %s from %s%s" % [data.get("amount", 0), String(data.get("resource", "")).capitalize(), String(data.get("location_id", "location")).replace("_", " "), " (cap reached)" if data.get("capped", false) else ""]
+		"TradeCompleted":
+			var offer: Dictionary = data.get("offer", {})
+			return "Trade · %s %s → %s %s" % [offer.get("cost", 0), offer.get("cost_resource", ""), offer.get("gain", 0), offer.get("gain_resource", "")]
+		"EquipmentPurchased", "EquipmentFound":
+			var item: Dictionary = Equipment.definitions().get(data.get("upgrade_id", ""), {})
+			return "%s · %s\n%s" % ["Purchased" if event.type == "EquipmentPurchased" else "Found", item.get("name", data.get("upgrade_id", "equipment")), item.get("description", "")]
+		"WorldEventApplied": return "[color=#dec18a]%s[/color] · %s" % [data.get("name", "World event"), String(data.get("hex", data.get("region", data.get("location_id", "The realm changes"))))]
+		"WorldEventSkipped": return "The first round begins without a world event." if data.get("reason", "") == "first_round" else "No world effect can be applied this round."
+		"WorldEffectExpired": return "%s has ended." % String(data.get("event_id", "World effect")).replace("_", " ").capitalize()
+		"RuinExplored": return "Ruin explored · %s\n%s" % [data.get("reward", {}).get("name", "Reward gained"), data.get("reward", {}).get("description", "")]
+		"RelicCollected": return "[color=#dec18a]Relic collected[/color] · " + String(data.get("hex", ""))
+		"GroundLootCollected": return "Recovered %s Gold and %d Relic(s)." % [data.get("gold", 0), data.get("relics", []).size()]
+		"VictoryClaimCreated": return "[color=#dec18a]%s claim declared[/color]\nInterrupt before round %s Resolution." % [String(data.get("route", "")).capitalize(), data.get("required_round", "next")]
+		"VictoryClaimCanceled": return "%s claim canceled · requirements lost." % String(data.get("route", "")).capitalize()
+		"RitualBegun": return "[color=#dec18a]Ascension Ritual begun[/color]\nInterrupt before this hero's next action."
+		"RitualCompleted": return "Ascension Ritual completed."
+		"VictoryAchieved": return "[color=#dec18a]%s wins by %s[/color] in round %s." % [", ".join(data.get("winners", [])).to_upper(), String(data.get("route", "victory")).capitalize(), data.get("round", "")]
 		"LocationCaptured": return "[color=#dec18a]Location captured[/color]  " + String(data.get("location_id", ""))
 		"InitiativeRolled": return "Initiative  " + JSON.stringify(data)
 		"StancesRevealed": return "[color=#dec18a]Stances revealed[/color]\n" + JSON.stringify(data)
@@ -1299,6 +1322,7 @@ func _publish_bridge() -> void:
 	ui["decision_player"] = _decision_player()
 	ui["mode"] = local_mode
 	ui["human_seat"] = human_seat
+	ui["viewer"] = viewer
 	ui["threats"] = threat_label.text
 	ui["victory_visible"] = victory_panel.visible
 	ui["victory_text"] = victory_text.text

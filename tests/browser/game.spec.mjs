@@ -180,6 +180,7 @@ test('combat UI keeps stances secret, reveals calculation and resolves Fate in o
   await clickControl(page, 'handoff');
   const beforeFirstChoice = await inspect(page);
   expect(beforeFirstChoice.ui.decision_player).toBe(battle.attacker);
+  expect(beforeFirstChoice.ui.viewer).toBe(battle.attacker);
   await clickControl(page, 'stance_assault');
   let snapshot = await inspect(page);
   expect(snapshot.state.pending_combat.stage).toBe('stances');
@@ -187,6 +188,7 @@ test('combat UI keeps stances secret, reveals calculation and resolves Fate in o
   expect(snapshot.ui.journal).not.toContain('Stances revealed');
   await clickControl(page, 'handoff');
   expect((await inspect(page)).ui.decision_player).toBe(battle.defender);
+  expect((await inspect(page)).ui.viewer).toBe(battle.defender);
   await clickControl(page, 'stance_guard');
   snapshot = await inspect(page);
   expect(snapshot.state.pending_combat.stage).toBe('fate_attacker');

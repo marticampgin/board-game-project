@@ -52,14 +52,23 @@ test('manual save, restore, settings and hotseat planning handoffs', async ({ pa
   await click(page, 'handoff');
   await click(page, 'settings');
   await click(page, 'reduced_motion');
+  await select(page, 'settings_speed', 2);
+  await select(page, 'settings_scale', 0);
   await click(page, 'settings_close');
   expect((await state(page)).ui.settings.reduced_motion).toBe(true);
+  expect((await state(page)).ui.settings.animation_speed).toBe(2);
+  expect((await state(page)).ui.settings.ui_scale).toBe(0.85);
   const view = (await state(page)).ui;
   for (const id of ['move', 'plan', 'ready_p2', 'save_game', 'load_game']) {
     if (!view.controls[id]) continue;
     expect(view.controls[id].y + view.controls[id].height, id).toBeLessThanOrEqual(view.size.height);
   }
   await page.screenshot({ path: info.outputPath('hotseat-settings-save.png') });
+  await page.waitForTimeout(300);
+  await page.reload();
+  await page.waitForFunction(() => window.realm?.ui?.controls?.start, null, { timeout: 60_000 });
+  expect((await state(page)).ui.settings.reduced_motion).toBe(true);
+  expect((await state(page)).ui.settings.ui_scale).toBe(0.85);
   expect(errors).toEqual([]);
 });
 
@@ -114,3 +123,27 @@ for (const route of ['conquest', 'dominion', 'ascension']) {
     expect(errors).toEqual([]);
   });
 }
+
+test('four active local seats finish a rendered match with no critical errors', async ({ page }, info) => {
+  const errors = await boot(page);
+  await click(page, 'start');
+  const result = await page.evaluate(async () => {
+    const players = new Set();
+    let commands = 0;
+    while (window.realm.state.phase !== 'victory' && commands < 1000) {
+      const command = window.realm.propose();
+      if (!command?.type) throw new Error('No bot continuation');
+      const result = window.realm.command(command);
+      if (!result.is_valid) throw new Error(JSON.stringify({ command, result }));
+      if (command.player_id) players.add(command.player_id);
+      commands++;
+      await new Promise(requestAnimationFrame);
+    }
+    return { victory: window.realm.state.victory, players: [...players].sort(), commands, heroes: Object.keys(window.realm.state.heroes) };
+  });
+  expect(result.victory.winners.length).toBeGreaterThan(0);
+  expect(result.players).toEqual(['p1', 'p2', 'p3', 'p4']);
+  expect(result.heroes).toHaveLength(4);
+  await page.screenshot({ path: info.outputPath('four-active-seats-victory.png') });
+  expect(errors).toEqual([]);
+});
