@@ -28,7 +28,7 @@ flowchart LR
 - `domain/resolvers/combat.gd`: pure, data-driven stance and damage arithmetic; no resource mutation or RNG draws.
 - `domain/resolvers/battle_flow.gd` and `class_flow.gd`: explicit combat, Fate, displacement, Bribe and Challenge windows; prepared class effects and movement interruption.
 - `domain/bots/simple_bot.gd`: deterministic policy over legal actions, public stats and discovered locations. It never inspects opponents' sealed stances or plans and does not draw gameplay RNG.
-- `domain/definitions/`: validated class, rule, terrain, location and tower-trait data.
+- `domain/definitions/`: validated class, rule, monster and tower-trait data; combat loads its stance table from JSON.
 - `domain/state/`: portable state, schema/definition validation and canonical checksums.
 - `domain/commands/` and `domain/events/`: stable intent/result/event foundations.
 - `services/deterministic_rng.gd`: named PRNG streams with serializable state and draw indices.

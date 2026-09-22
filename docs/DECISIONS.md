@@ -33,3 +33,19 @@ Complete Milestones 0 and 1 first, validate them, then extend to Milestone 2 if 
 ## Milestones 0–1 checkpoint
 
 Godot headless rules, CLI process/persistence tests, and the real Godot web export passed. Browser input completed three rounds with all heroes moving, tower capture and income. 1280×720 and 1920×1080 were exercised. Milestone 2 begins after this checkpoint.
+
+## Milestone 2 timing and combat defaults
+
+- Combat keeps the scheduled phase and opens explicit participant windows. Attack declaration starts the action; only the final resolution consumes that scheduled slot. Defending, reacting, rerolling and being downed do not consume the defender's slot.
+- Stance submissions are sealed until both are chosen. Trick is charged at reveal to avoid leaking the secret through the public Fate total. Attacker reroll precedes defender reroll; a player with no Fate does not receive an impossible prompt.
+- Assault's extra point applies to any loss, including ties with zero base damage. Guard reduces positive damage only and never creates damage from zero. Prepared Hex modifies the die with a minimum of 1 and maximum of 6.
+- Wolf Pack: HP 4 / Attack 3 / Defence 1, reward 2 Gold. Stone Guardian: 6 / 4 / 4, reward 2 Power. Relic Wraith: 5 / 5 / 3, reward 1 Relic. Monster defenders stay in their camp; hero margin damage uses the shared resolver.
+- A severe hit's 1 Gold drop is cumulative with defeat consequences. A downed hero drops one Relic, otherwise loses up to 2 Gold, and returns at 60% rounded-up HP with Recovering until World. Sanctuaries are reserved to their owning hero so recovery can never create overlapping pieces.
+- Snare targets a nearby, walkable, unoccupied non-Sanctuary hex; visible details within range 2 establish discovery. Only one per Ranger is active and unused traps expire at Resolution. Opponents see a generic warning marker.
+- Challenge can stop movement only after at least one actual step. Accepting uses its once-per-round flag; declining does not. Bribe offers and acceptance are separate legal decisions; canceled attacks still consume the attacker's action.
+- Prepared Hex expires at the next Planning phase or the target's first declared combat, including a Bribe-canceled combat.
+- Forced March waives one difficult-terrain cost but never bypasses Swamp's mandatory stop. Cycle 1 initiative changes apply to Cycle 2; Cycle 2 changes carry to next round. Equal adjusted scores preserve the already randomized order.
+- Any successful enemy hero combat hit contests and cancels an Ancient Tower commitment. Any different action on the claimant's next scheduled slot also cancels it; completion is deliberately required on that next slot.
+- Level 2 adds 1 Defence for 3 Gold. Level 3 adds 1 income for 5 Gold, with no additional Defence. Definitions and tests distinguish this from compounding both benefits.
+- These are documented prototype defaults, not final balance claims. Victory, trading, exploration, class thematic Fate gains and the remaining content remain Milestone 3 work.
+- The first bot uses stable public heuristics instead of weighted random decisions: Guard when badly wounded, otherwise Assault, reroll own die on 1–2, pursue capturable sites and nearby combat, and resolve only legal windows. It consumes no additional RNG and never reads opposing sealed choices.

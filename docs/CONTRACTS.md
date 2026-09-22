@@ -27,3 +27,15 @@ Commands M1: `advance` (world->planning, initiative->cycle_1, bonus->resolution,
 `tests/run_tests.gd` extends SceneTree, preloads test suites; exits 1 on failed assertion. Generation owner writes `tests/unit/test_hex_map.gd`; rules owner writes `tests/unit/test_rules.gd`. Each suite exposes `run()->Array[String]` of errors; tooling integrates both and additional acceptance integration tests.
 
 CLI and Playwright consume the exact contracts above. Root owns project config, scenes/presentation, web export and browser test implementation. Tooling owner owns CLI launcher, logging service, tests/run_tests.gd and integration/CLI tests, package.json initially, README and docs except DECISIONS/CONTRACTS.
+
+## Milestone 2 extensions
+
+The content version is `0.2.0-m2`. State adds `monsters`, `pending_combat`, `pending_reaction`, `pending_move`, `traps`, `commitments`, `ground_loot`, `cycle_2_modifiers`, and `next_cycle_order`. These are serializable data; `GameState.validation_errors` checks pending participant/phase/reference/calculation consistency before restoration.
+
+Commands: `attack {player_id,target_id}`, `choose_stance {player_id,stance}`, `spend_fate {player_id}`, `decline_fate {player_id}`, `displace {player_id,target}`, `resolve_reaction {player_id,choice}`, `special {player_id,special_id,target?}`, `upgrade {player_id}`. `capture` begins or completes an Ancient commitment according to state. Planning supports `{initiative_push:true,snare:hex,prepared_hex:enemy_id}` for applicable classes/resources.
+
+`legal_actions` returns attack targets keyed by hero/monster ID with `{hex,name,kind,hp,defence}`. Stance/reaction windows expose `choices`; displacement exposes `targets`; Special exposes a `choices` dictionary with `rest`/`forced_march` entries. Planning options expose `initiative_push`, `snare_targets`, and `prepared_hex_targets`. All clients must query legal actions for the decision owner, who may differ from the current scheduled actor.
+
+Pending combat stages: `stances`, `fate_attacker`, `fate_defender`, `displacement`. Reaction kinds: `challenge`, `bribe_offer`, `bribe_response`. Reactions and combat preserve the underlying cycle and consume only the declared attack/move slot when its final resolution completes.
+
+`Combat.evaluate` is pure arithmetic and returns full stat/stance/modifier/die totals and outcome fields. `battle_flow.gd` applies costs, damage, drops and recovery; `class_flow.gd` handles simultaneous preparation and interrupted paths. `SimpleBot.choose(rules)` proposes one ordinary command without mutating state.

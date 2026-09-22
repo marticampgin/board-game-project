@@ -267,7 +267,7 @@ func _build_ui() -> void:
 	_build_decision_ui()
 	rules_dialog = AcceptDialog.new()
 	rules_dialog.title = "The rules of the realm"
-	rules_dialog.dialog_text = "Each round: World > Planning > Initiative > two Action Cycles > Bonus > Resolution.\n\nEvery hero acts once in each cycle. Initiative is Speed + d3.\nMove: 3 movement points; road-only paths allow 4. Forest costs 2 (Ranger: 1). Swamp ends movement. Occupied and impassable hexes block paths.\n\nCapture a neutral Minor Tower while standing on it. Capture uses its own action. Minor Towers produce 1 Power at Resolution. Fate increases by 1, capped at 5.\n\nMove and capture are authoritative commands. Green rings show legal targets; hover previews cost and path.\n\nCamera: WASD pan · Q/E or middle drag rotate · wheel zoom · F/Home focus.\n\nThis milestone proves the board and round rhythm. Victory routes and later content are tracked in the master specification."
+	rules_dialog.dialog_text = "Each round: World > Planning > Initiative > two Action Cycles > Bonus > Resolution. Every hero acts once in each cycle. Initiative is Speed + d3.\n\nMove: 3 MP; road-only paths allow 4. Forest costs 2 (Ranger: 1). Swamp ends movement. Occupied and impassable hexes block paths.\n\nMinor Towers capture in one action; Ancient Towers need Begin then Complete on your next action. Towers pay Power at Resolution. Upgrades cost 3/5 Gold.\n\nCombat: select an adjacent target, choose sealed stances, then reveal. Assault +2; Guard +1 and reduces damage; Counter +3 against Assault, otherwise -1; Trick costs 1 Fate and gains +2 against Guard/Counter. Ties defend. Attacker rerolls first, then defender. Each reroll costs 1 Fate.\n\nFate caps at 5 and grows by 1 each Resolution. Planning offers Initiative Push, Ranger Snare and Cultist Prepared Hex. Downed heroes recover at Sanctuary and retain scheduled actions.\n\nGreen rings: Move. Red rings: Attack. Camera: WASD pan, Q/E rotate, wheel zoom, F/Home focus. Victory routes and exploration arrive in Milestone 3."
 	add_child(rules_dialog)
 	pass_dialog = ConfirmationDialog.new()
 	pass_dialog.title = "Pass this action>"
@@ -657,7 +657,10 @@ func _hover_hex(hex: String) -> void:
 		return
 	var tile: Dictionary = rules.state.data.map.hexes[hex]
 	var info: String = "%s · %s · %s" % [hex, String(tile.terrain).capitalize(), tile.region]
-	if board.reachable.has(hex):
+	if target_mode == "attack":
+		for target: Dictionary in rules.legal_actions(rules.current_actor()).get("attack", {}).get("targets", {}).values():
+			if target.hex == hex: info += "  |  Attack %s · HP %d · base Defence %d" % [target.name, target.hp, target.defence]
+	elif board.reachable.has(hex):
 		var route: Dictionary = board.reachable[hex]
 		info += "  |  %d MP  ·  %s" % [route.cost, " > ".join(route.path)]
 		if route.road_only: info += "  [road]"

@@ -1,4 +1,10 @@
 import { test, expect } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+
+const executeFile = promisify(execFile);
 
 async function inspect(page) {
   return page.evaluate(() => { window.realm.inspect(); return { state: window.realm.state, ui: window.realm.ui, legal: window.realm.legal }; });
@@ -97,6 +103,10 @@ test('native Godot UI: planning, camera, movement, capture, income and three rou
   expect(commandCount).toBe(24);
   expect(final.state.events.some(event => event.type === 'IncomeGranted')).toBe(true);
   expect(final.ui.journal.length).toBeGreaterThan(100);
+  const browserSave = testInfo.outputPath('browser-state.json');
+  await writeFile(browserSave, JSON.stringify(final.state));
+  const replay = await executeFile(process.execPath, [fileURLToPath(new URL('../../tools/realm.mjs', import.meta.url)), 'replay', '--state', browserSave, '--json'], { windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
+  expect(JSON.parse(replay.stdout).matches, 'native headless replay must match the browser-authored game').toBe(true);
   const imagePath = testInfo.outputPath('board-1280.png');
   await page.screenshot({ path: imagePath });
   await testInfo.attach('Godot native UI 1280×720', { path: imagePath, contentType: 'image/png' });
