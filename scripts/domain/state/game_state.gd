@@ -223,6 +223,7 @@ static func validation_errors(values: Dictionary) -> Array[String]:
 		if not values.heroes.has(player_id) or not values.plans[player_id] is Dictionary:
 			errors.append("INVALID_PLAN")
 	_validate_phase_consistency(values, errors)
+	_validate_conflict_state(values, catalog, errors)
 	for index: int in values.events.size():
 		var event: Variant = values.events[index]
 		if not event is Dictionary or event.get("sequence", -1) != index + 1 or not event.get("type") is String or not event.get("data") is Dictionary:
@@ -264,3 +265,97 @@ static func _validate_phase_consistency(values: Dictionary, errors: Array[String
 
 static func _integer(value: Variant) -> bool:
 	return (value is int or value is float) and is_finite(float(value)) and float(value) == floor(float(value))
+
+static func _validate_conflict_state(values: Dictionary, catalog: RefCounted, errors: Array[String]) -> void:
+	for field: String in ["monsters", "pending_combat", "pending_reaction", "pending_move", "traps", "commitments", "ground_loot", "cycle_2_modifiers"]:
+		if not values.get(field) is Dictionary:
+			errors.append("INVALID_CONFLICT_DICTIONARY:" + field)
+	if not values.get("next_cycle_order") is Array:
+		errors.append("INVALID_NEXT_CYCLE_ORDER")
+	if not errors.is_empty(): return
+	if values.monsters.size() != 4: errors.append("INVALID_MONSTER_COUNT")
+	for monster_id: String in values.monsters:
+		var monster: Variant = values.monsters[monster_id]
+		if not monster is Dictionary:
+			errors.append("INVALID_MONSTER:" + monster_id)
+			continue
+		if monster.get("id", "") != monster_id or not catalog.monsters.has(monster.get("definition_id", "")):
+			errors.append("UNKNOWN_MONSTER_DEFINITION:" + monster_id)
+		if not values.map.hexes.has(monster.get("hex", "")) or not values.map.locations.has(monster.get("camp_id", "")):
+			errors.append("INVALID_MONSTER_LOCATION:" + monster_id)
+		elif values.map.locations[monster.camp_id].hex != monster.hex:
+			errors.append("MONSTER_CAMP_MISMATCH:" + monster_id)
+		for field: String in ["hp", "max_hp", "attack", "defence"]:
+			if not _integer(monster.get(field)) or int(monster.get(field, -1)) < 0:
+				errors.append("INVALID_MONSTER_STAT:" + monster_id)
+	for player_id: String in values.heroes:
+		var prepared: Variant = values.heroes[player_id].get("prepared_hex")
+		if not prepared is Dictionary:
+			errors.append("INVALID_PREPARED_HEX")
+		elif not prepared.is_empty() and (not values.heroes.has(prepared.get("target_id", "")) or prepared.get("target_id", "") == player_id or not _integer(prepared.get("expires_planning_round"))):
+			errors.append("INVALID_PREPARED_HEX_TARGET")
+	for player_id: String in values.plans:
+		var plan: Dictionary = values.plans[player_id]
+		for key: String in plan:
+			if key not in ["no_change", "initiative_push", "snare", "prepared_hex"]: errors.append("UNKNOWN_PLANNING_CHOICE")
+			if key in ["no_change", "initiative_push"] and not plan[key] is bool: errors.append("INVALID_PLANNING_FLAG")
+		if plan.has("snare") and (values.heroes[player_id].class_id != "ranger" or not values.map.hexes.has(plan.snare)): errors.append("INVALID_SNARE_PLAN")
+		if plan.has("prepared_hex") and (values.heroes[player_id].class_id != "cultist" or not values.heroes.has(plan.prepared_hex) or plan.prepared_hex == player_id): errors.append("INVALID_PREPARED_HEX_PLAN")
+		if values.phase == "planning":
+			if plan.get("initiative_push", false) and int(values.heroes[player_id].fate) < 2: errors.append("UNAFFORDABLE_PLAN")
+			if (plan.has("snare") or plan.has("prepared_hex")) and int(values.heroes[player_id].power) < 1: errors.append("UNAFFORDABLE_PLAN")
+	for owner_id: String in values.traps:
+		var trap: Variant = values.traps[owner_id]
+		if not trap is Dictionary or not values.heroes.has(owner_id) or trap.get("owner_id", "") != owner_id or trap.get("kind", "") != "snare" or not values.map.hexes.has(trap.get("hex", "")) or not _integer(trap.get("expires_round")):
+			errors.append("INVALID_TRAP")
+	for player_id: String in values.commitments:
+		var commitment: Variant = values.commitments[player_id]
+		if not commitment is Dictionary or not values.heroes.has(player_id) or not values.map.locations.has(commitment.get("location_id", "")):
+			errors.append("INVALID_COMMITMENT")
+			continue
+		var location: Dictionary = values.map.locations[commitment.location_id]
+		if commitment.get("kind", "") != "ancient_capture" or location.kind not in ["ancient_tower", "worldspire"] or commitment.get("hex", "") != location.hex or values.heroes[player_id].hex != location.hex or location.owner_id == player_id:
+			errors.append("COMMITMENT_REQUIREMENTS_LOST")
+	if not values.next_cycle_order.is_empty():
+		var next_seen: Dictionary = {}
+		for player_id: Variant in values.next_cycle_order:
+			if not values.heroes.has(player_id) or next_seen.has(player_id): errors.append("INVALID_NEXT_CYCLE_ORDER")
+			next_seen[player_id] = true
+		if next_seen.size() != 4: errors.append("INVALID_NEXT_CYCLE_ORDER")
+	for player_id: String in values.cycle_2_modifiers:
+		if not values.heroes.has(player_id) or not _integer(values.cycle_2_modifiers[player_id]): errors.append("INVALID_CYCLE_MODIFIER")
+	var battle: Dictionary = values.pending_combat
+	var reaction: Dictionary = values.pending_reaction
+	var movement: Dictionary = values.pending_move
+	if not battle.is_empty() or not reaction.is_empty() or not movement.is_empty():
+		if values.phase not in ["cycle_1", "cycle_2"] or values.initiative_order.size() != 4:
+			errors.append("WINDOW_OUTSIDE_ACTION_CYCLE")
+			return
+		if int(values.current_actor_index) < 0 or int(values.current_actor_index) >= 4: return
+	if not battle.is_empty():
+		if not values.heroes.has(battle.get("attacker_id", "")) or battle.get("attacker_id", "") != values.initiative_order[values.current_actor_index]: errors.append("INVALID_COMBAT_ATTACKER")
+		if battle.get("defender_kind", "") not in ["hero", "monster"]: errors.append("INVALID_COMBAT_KIND")
+		var opponents: Dictionary = values.heroes if battle.get("defender_kind", "") == "hero" else values.monsters
+		if not opponents.has(battle.get("defender_id", "")) or battle.get("attacker_id", "") == battle.get("defender_id", ""): errors.append("INVALID_COMBAT_DEFENDER")
+		if battle.get("stage", "") not in ["stances", "fate_attacker", "fate_defender", "displacement"]: errors.append("INVALID_COMBAT_STAGE")
+		for field: String in ["stances", "dice", "calculation", "rerolled", "modifiers"]:
+			if not battle.get(field) is Dictionary: errors.append("INVALID_COMBAT_FIELD:" + field)
+		if not errors.is_empty(): return
+		for participant: String in battle.stances:
+			if participant not in [battle.attacker_id, battle.defender_id] or battle.stances[participant] not in ["assault", "guard", "counter", "trick", "none"]: errors.append("INVALID_STORED_STANCE")
+		if battle.stage != "stances":
+			if battle.stances.size() != 2 or battle.dice.size() != 2: errors.append("INCOMPLETE_REVEALED_COMBAT")
+			for side: String in ["attacker", "defender"]:
+				if not _integer(battle.dice.get(side)) or int(battle.dice.get(side, 0)) < 1 or int(battle.dice.get(side, 0)) > 6: errors.append("INVALID_COMBAT_DIE")
+		if battle.stage in ["fate_defender", "displacement"] and battle.defender_kind != "hero": errors.append("MONSTER_DECISION_WINDOW")
+	if not reaction.is_empty():
+		if not values.heroes.has(reaction.get("actor_id", "")) or reaction.get("choices", []) != ["accept", "decline"]: errors.append("INVALID_REACTION_OWNER")
+		if reaction.get("kind", "") == "challenge":
+			if movement.is_empty() or not battle.is_empty(): errors.append("INVALID_CHALLENGE_CONTEXT")
+		elif reaction.get("kind", "") in ["bribe_offer", "bribe_response"]:
+			if battle.is_empty() or not movement.is_empty(): errors.append("INVALID_BRIBE_CONTEXT")
+		else: errors.append("INVALID_REACTION_KIND")
+	if not movement.is_empty():
+		if not values.heroes.has(movement.get("actor_id", "")) or movement.get("actor_id", "") != values.initiative_order[values.current_actor_index]: errors.append("INVALID_MOVEMENT_ACTOR")
+		if reaction.get("kind", "") != "challenge": errors.append("MOVEMENT_WITHOUT_REACTION")
+		if not movement.get("path") is Array or not movement.get("route") is Dictionary or not _integer(movement.get("index")) or not movement.get("declined_challenges") is Array: errors.append("INVALID_PENDING_MOVEMENT")

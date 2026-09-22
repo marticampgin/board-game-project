@@ -4,12 +4,16 @@ extends RefCounted
 var classes: Dictionary = {}
 var tower_traits: Dictionary = {}
 var rules: Dictionary = {}
+var monsters: Dictionary = {}
+var stances: Dictionary = {}
 var errors: Array[String] = []
 
 func _init() -> void:
 	classes = _load_table("res://data/classes.json")
 	tower_traits = _load_table("res://data/tower_traits.json")
 	rules = _load_table("res://data/rules.json")
+	monsters = _load_table("res://data/monsters.json")
+	stances = _load_table("res://data/stances.json")
 	for class_id: String in classes:
 		var definition: Dictionary = classes[class_id]
 		for field: String in ["hp", "attack", "defence", "speed", "move"]:
@@ -35,4 +39,4 @@ func _load_table(path: String) -> Dictionary:
 	return parsed
 
 func export_table() -> Dictionary:
-	return {"classes": classes.duplicate(true), "tower_traits": tower_traits.duplicate(true), "rules": rules.duplicate(true), "errors": errors.duplicate()}
+	return {"classes": classes.duplicate(true), "tower_traits": tower_traits.duplicate(true), "monsters": monsters.duplicate(true), "stances": stances.duplicate(true), "rules": rules.duplicate(true), "errors": errors.duplicate()}

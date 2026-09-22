@@ -1,5 +1,5 @@
 {
-  "content_version":"0.1.0-m1",
+  "content_version":"0.2.0-m2",
   "starting_gold":4,"starting_power":2,"starting_fate":1,
   "power_cap":12,"fate_cap":5,"discovery_radius":2,
   "minor_tower_income":1,"ancient_tower_income":2,"settlement_income":2,
