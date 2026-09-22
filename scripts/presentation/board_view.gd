@@ -149,8 +149,7 @@ func build(map: Dictionary) -> void:
 		var tile: Dictionary = map.hexes[key]
 		var pos: Vector3 = Hex.to_world(key)
 		var color: Color = TERRAIN.get(tile.terrain, TERRAIN.plains)
-		var base := _cylinder(tiles, pos + Vector3(0, -0.19, 0), 0.97, 0.38, color, 6)
-		base.rotation_degrees.y = 30
+		_cylinder(tiles, pos + Vector3(0, -0.19, 0), 0.97, 0.38, color, 6)
 		if tile.terrain == "forest":
 			for index in 3:
 				var offset := Vector3((index - 1) * 0.38, 0, -0.05 if index == 1 else 0.23)

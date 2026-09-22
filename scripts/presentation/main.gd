@@ -172,9 +172,9 @@ func _build_ui() -> void:
 	body.add_child(left)
 	left.add_child(_label("THE FOUR FACTIONS", 12, MUTED))
 	cards = VBoxContainer.new()
-	cards.add_theme_constant_override("separation", 9)
+	cards.add_theme_constant_override("separation", 6)
 	left.add_child(cards)
-	var local_note := _label("LOCAL DEVELOPMENT\nAll four seats are yours.\nSelect a card to inspect.", 12, MUTED)
+	var local_note := _label("LOCAL · ALL FOUR SEATS\nSelect a card to inspect.", 11, MUTED)
 	local_note.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	local_note.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
 	left.add_child(local_note)
@@ -259,7 +259,7 @@ func _build_ui() -> void:
 	rules_dialog.dialog_text = "Each round: World → Planning → Initiative → two Action Cycles → Bonus → Resolution.\n\nEvery hero acts once in each cycle. Initiative is Speed + d3.\nMove: 3 movement points; road-only paths allow 4. Forest costs 2 (Ranger: 1). Swamp ends movement. Occupied and impassable hexes block paths.\n\nCapture a neutral Minor Tower while standing on it. Capture uses its own action. Minor Towers produce 1 Power at Resolution. Fate increases by 1, capped at 5.\n\nMove and capture are authoritative commands. Green rings show legal targets; hover previews cost and path.\n\nCamera: WASD pan · Q/E or middle drag rotate · wheel zoom · F/Home focus.\n\nThis milestone proves the board and round rhythm. Victory routes and later content are tracked in the master specification."
 	add_child(rules_dialog)
 	pass_dialog = ConfirmationDialog.new()
-	pass_dialog.title = "Pass this action?"
+	pass_dialog.title = "Pass this action>"
 	pass_dialog.dialog_text = "This action will be lost. Your next action still follows initiative order."
 	pass_dialog.confirmed.connect(func() -> void: _command({"type": "pass", "player_id": rules.current_actor()}))
 	add_child(pass_dialog)
@@ -267,8 +267,10 @@ func _build_ui() -> void:
 func _build_debug() -> void:
 	debug_panel = _panel(Color("102128"), 16)
 	debug_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	debug_panel.position = Vector2(300, 150)
-	debug_panel.size = Vector2(665, 410)
+	debug_panel.offset_left = -332
+	debug_panel.offset_right = 333
+	debug_panel.offset_top = -205
+	debug_panel.offset_bottom = 205
 	debug_panel.visible = false
 	add_child(debug_panel)
 	var stack := VBoxContainer.new()
@@ -292,8 +294,10 @@ func _build_debug() -> void:
 func _build_welcome() -> void:
 	welcome = _panel(Color("192f37"), 30)
 	welcome.set_anchors_and_offsets_preset(Control.PRESET_CENTER)
-	welcome.position = Vector2(375, 210)
-	welcome.size = Vector2(530, 260)
+	welcome.offset_left = -265
+	welcome.offset_right = 265
+	welcome.offset_top = -140
+	welcome.offset_bottom = 140
 	add_child(welcome)
 	var stack := VBoxContainer.new()
 	stack.add_theme_constant_override("separation", 14)
@@ -318,6 +322,9 @@ func _new_game(seed_value: int) -> void:
 func _regenerate() -> void:
 	if not seed_edit.text.is_valid_int():
 		feedback.text = "Enter an integer seed."
+		return
+	if int(seed_edit.text) < -2147483648 or int(seed_edit.text) > 2147483647:
+		feedback.text = "Seed must be between -2147483648 and 2147483647."
 		return
 	_new_game(int(seed_edit.text))
 	feedback.text = "World regenerated from seed %s. All seats reset." % seed_edit.text
@@ -376,10 +383,10 @@ func _refresh_cards() -> void:
 	for id: String in state.heroes:
 		var hero: Dictionary = state.heroes[id]
 		var color: Color = Board.TEAM[int(id.substr(1)) - 1]
-		var panel := _panel(Color("263d42") if viewer == id else Color("1a2f37"), 10)
+		var panel := _panel(Color("263d42") if viewer == id else Color("1a2f37"), 7)
 		cards.add_child(panel)
 		var stack := VBoxContainer.new()
-		stack.add_theme_constant_override("separation", 4)
+		stack.add_theme_constant_override("separation", 2)
 		panel.add_child(stack)
 		var select := _button("seat_" + id, "%s   %s%s" % [id.to_upper(), hero.name, "  •" if rules.current_actor() == id else ""], func() -> void:
 			viewer = id
@@ -388,11 +395,25 @@ func _refresh_cards() -> void:
 			board.focus_hex(selected_hex)
 			_refresh())
 		select.add_theme_color_override("font_color", color)
+		select.add_theme_font_size_override("font_size", 14)
+		for style_name in ["normal", "hover", "pressed", "focus"]:
+			var style: StyleBoxFlat = theme.get_stylebox(style_name, "Button").duplicate()
+			style.content_margin_top = 3
+			style.content_margin_bottom = 3
+			select.add_theme_stylebox_override(style_name, style)
 		select.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		stack.add_child(select)
-		stack.add_child(_label("HP %d/%d   ATK %d   DEF %d   SPD %d" % [hero.hp, hero.max_hp, hero.attack, hero.defence, hero.speed], 11, MUTED))
-		stack.add_child(_label("Gold %d    Power %d    Relics %d" % [hero.gold, hero.power, hero.relics.size()], 12))
-		stack.add_child(_label("Fate  %s%s" % ["●".repeat(hero.fate), "○".repeat(5 - hero.fate)], 13, color))
+		stack.add_child(_label("HP %d/%d   ATK %d   DEF %d   SPD %d" % [hero.hp, hero.max_hp, hero.attack, hero.defence, hero.speed], 10, MUTED))
+		stack.add_child(_label("Gold %d    Power %d    Relics %d" % [hero.gold, hero.power, hero.relics.size()], 11))
+		var fate_row := HBoxContainer.new()
+		stack.add_child(fate_row)
+		fate_row.add_child(_label("Fate %d/5 " % hero.fate, 11, color))
+		for index in 5:
+			var pip := ColorRect.new()
+			pip.custom_minimum_size = Vector2(9, 7)
+			pip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			pip.color = color if index < hero.fate else Color("3d5156")
+			fate_row.add_child(pip)
 
 func _refresh_actions() -> void:
 	_clear(actions)
@@ -468,6 +489,9 @@ func _refresh_selection() -> void:
 		var visible: bool = location.kind in ["worldspire", "ancient_tower"] or viewer in location.get("discovered_by", [])
 		if visible:
 			value += "\n[b]%s[/b]\n%s · Level %d\nOwner: %s" % [location.name, String(location.kind).replace("_", " ").capitalize(), location.level, location.owner_id if not String(location.owner_id).is_empty() else "Neutral"]
+			if rules.definitions.tower_traits.has(location.get("trait", "")):
+				var trait: Dictionary = rules.definitions.tower_traits[location.trait]
+				value += "\n[color=#dec18a]%s[/color]: %s" % [trait.name, trait.description]
 		else: value += "\nUndiscovered location\nApproach within 2 hexes."
 	else:
 		value += "\n%s" % {"plains": "Open ground · 1 movement point", "forest": "Forest · 2 MP (Ranger: 1)\nDefender gains +1 Defence", "swamp": "Swamp · ends movement", "water": "Water · impassable", "mountain": "Mountain · impassable"}.get(tile.terrain, "")
@@ -572,6 +596,7 @@ func _bridge_command(args: Array) -> void:
 	_publish_bridge()
 
 func _bridge_reset(args: Array) -> void:
+	if args.is_empty() or int(args[0]) < -2147483648 or int(args[0]) > 2147483647: return
 	_new_game(int(args[0]))
 	started = true
 	welcome.hide()
