@@ -49,3 +49,18 @@ Godot headless rules, CLI process/persistence tests, and the real Godot web expo
 - Level 2 adds 1 Defence for 3 Gold. Level 3 adds 1 income for 5 Gold, with no additional Defence. Definitions and tests distinguish this from compounding both benefits.
 - These are documented prototype defaults, not final balance claims. Victory, trading, exploration, class thematic Fate gains and the remaining content remain Milestone 3 work.
 - The first bot uses stable public heuristics instead of weighted random decisions: Guard when badly wounded, otherwise Assault, reroll own die on 1–2, pursue capturable sites and nearby combat, and resolve only legal windows. It consumes no additional RNG and never reads opposing sealed choices.
+
+## Expanded scope: complete Milestones 3–5
+
+The user explicitly authorized completing every milestone, including the presentation pass and ENet proof, before stopping. The earlier slice boundaries above record historical checkpoints and do not limit the active scope. Final production art remains outside this prototype.
+
+- Settlement capture is an automatic single action when no enemy hero occupies the site. The spec supplies no separate Settlement defence roll.
+- Both Ruins contain one guaranteed Relic plus a seeded weighted bonus. Two Wraith camps provide the other guaranteed Relic sources. Four contested sources make Ascension reachable without relying on a lucky reward draw.
+- Explore Alternatives costs 2 Fate and offers two distinct bonus rewards. Cultist Dark Bargain is an optional Ruin exploration branch: lose 2 Health, survive the payment, gain 2 Power and the class Fate trigger.
+- Conquest and Dominion claims are declared after Resolution income and confirmed before income at the following Resolution. Every accepted action rechecks claim requirements. Ascension requires Begin Ritual followed by Complete Ritual on the next scheduled action; ordinary non-displacing damage alone does not cancel it.
+- Equipment occupies at most three slots. The eight data-defined items implement actual effects, including one-use Tower Kit and Lucky Charm's once-per-round keep-better reroll. Planning purchases resolve with the simultaneous plans.
+- World events use their own saved RNG stream. Bridge closure requires a surviving alternative and whole-board connectivity; curses modify movement terrain while retaining underlying terrain and explicit expiry.
+- Local modes are sandbox (all seats), solo (chosen human plus three deterministic bots), and hotseat (private Planning and stance handoffs). The development browser bridge intentionally exposes the full local state for tests; network observations must be filtered before transport.
+- Manual saves and round autosaves use validated versioned envelopes, a temporary replacement file, and one rotating backup. Mode and human seat are presentation metadata. CLI tooling can continue the same saved domain state.
+- Presentation settings persist separately from gameplay: four audio buses, generated nonessential text-backed cues, reduced motion, animation speed, UI scale and hints. The Music bus has no soundtrack in this prototype.
+- Match duration is measured, never forced. The 40-round automated-test guard reports a failure if a bot match stalls; it cannot invent a winner or alter game rules.

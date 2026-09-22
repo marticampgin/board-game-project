@@ -8,6 +8,7 @@ const Hex = preload("res://scripts/domain/hex/hex.gd")
 const Bot = preload("res://scripts/domain/bots/simple_bot.gd")
 const Saves = preload("res://scripts/services/snapshot_store.gd")
 const Preferences = preload("res://scripts/services/preferences.gd")
+const Equipment = preload("res://scripts/domain/resolvers/equipment.gd")
 const PHASES: Array[String] = ["world", "planning", "initiative", "cycle_1", "cycle_2", "bonus", "resolution"]
 const INK := Color("eee8d8")
 const MUTED := Color("91aaa9")
@@ -53,6 +54,7 @@ var planning_snare: OptionButton
 var planning_hex: OptionButton
 var planning_seat: String = ""
 var planning_purchase: OptionButton
+var planning_purchases: Array[OptionButton] = []
 var mode_select: OptionButton
 var seat_select: OptionButton
 var local_mode: String = "sandbox"
@@ -213,9 +215,14 @@ func _build_ui() -> void:
 	left.add_child(_label("THE FOUR FACTIONS", 12, MUTED))
 	cards = VBoxContainer.new()
 	cards.add_theme_constant_override("separation", 6)
-	left.add_child(cards)
+	cards.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var card_scroll := ScrollContainer.new()
+	card_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	card_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	left.add_child(card_scroll)
+	card_scroll.add_child(cards)
 	session_label = _label("LOCAL · ALL FOUR SEATS", 11, MUTED)
-	session_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	session_label.size_flags_vertical = Control.SIZE_SHRINK_END
 	session_label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
 	left.add_child(session_label)
 	var save_row := HBoxContainer.new()
@@ -306,6 +313,8 @@ func _build_ui() -> void:
 	rules_dialog.title = "The rules of the realm"
 	rules_dialog.dialog_text = "Each round: World > Planning > Initiative > two Action Cycles > Bonus > Resolution. Every hero acts once in each cycle. Initiative is Speed + d3.\n\nMove: 3 MP; road-only paths allow 4. Forest costs 2 (Ranger: 1). Swamp ends movement. Occupied and impassable hexes block paths.\n\nMinor Towers capture in one action; Ancient Towers need Begin then Complete on your next action. Towers pay Power at Resolution. Upgrades cost 3/5 Gold.\n\nCombat: select an adjacent target, choose sealed stances, then reveal. Assault +2; Guard +1 and reduces damage; Counter +3 against Assault, otherwise -1; Trick costs 1 Fate and gains +2 against Guard/Counter. Ties defend. Attacker rerolls first, then defender. Each reroll costs 1 Fate.\n\nFate caps at 5 and grows by 1 each Resolution. Planning offers Initiative Push, Ranger Snare and Cultist Prepared Hex. Downed heroes recover at Sanctuary and retain scheduled actions.\n\nGreen rings: Move. Red rings: Attack. Camera: WASD pan, Q/E rotate, wheel zoom, F/Home focus. Victory routes and exploration arrive in Milestone 3."
 	add_child(rules_dialog)
+	buttons.rules_close = rules_dialog.get_ok_button()
+	rules_dialog.dialog_text = "ROUND: World event > private Planning > Initiative > Cycle 1 > Cycle 2 > Bonus > Resolution. Every hero has one action per cycle. Speed + d3 sets initiative.\n\nMOVE: 3 MP, or 4 on roads only. Forest costs 2 (Ranger: 1). Swamp ends movement. Occupied, mountain and water hexes block travel. Green rings show legal destinations.\n\nCAPTURE: Minor Towers and Settlements take one action. Ancient Towers require Begin then Complete on your next action; disruption cancels the commitment. Owned sites pay income at Resolution.\n\nCOMBAT: Adjacent target > sealed stances > simultaneous reveal > attacker Fate > defender Fate > damage/displacement. Assault +2, Guard +1 and damage protection, Counter +3 versus Assault / -1 otherwise, Trick costs 1 Fate and counters Guard/Counter. Ties defend.\n\nECONOMY: Trade at friendly/neutral Settlements or the Wandering Market. Control a Settlement to buy up to three equipment items in Planning. Explore Ruins for Relics and rewards; 2 Fate reveals two bonuses to choose from.\n\nCONQUEST: Hold all four Ancient Towers including Worldspire through the next Resolution. DOMINION: Hold both Settlements, an unblocked road network and 15 Gold through the next Resolution. ASCENSION: Bring 3 Relics to Worldspire, Begin Ritual, then Complete on your next action. Losing requirements cancels claims immediately.\n\nFATE: Capped at 5, +1 each Resolution, plus class and setback triggers once per round. RECOVERING: A downed hero returns to their Sanctuary, is temporarily untargetable and retains scheduled actions.\n\nCAMERA: WASD pan, Q/E rotate, wheel zoom, F/Home focus. Hover actions and faction cards for detail. Save manually or continue the most recent round autosave."
 	pass_dialog = ConfirmationDialog.new()
 	pass_dialog.title = "Pass this action?"
 	pass_dialog.dialog_text = "This action will be lost. Your next action still follows initiative order."
@@ -368,9 +377,11 @@ func _build_welcome() -> void:
 	mode_select.add_item("Local sandbox · control all four heroes")
 	mode_select.add_item("Solo · one human and three bots")
 	mode_select.add_item("Hotseat · four humans with private handoffs")
+	buttons.mode_select = mode_select
 	stack.add_child(mode_select)
 	seat_select = OptionButton.new()
 	for value: String in ["P1 · Ranger", "P2 · Warlord", "P3 · Merchant", "P4 · Cultist"]: seat_select.add_item(value)
+	buttons.seat_select = seat_select
 	seat_select.tooltip_text = "Your hero in Solo mode. All heroes remain inspectable."
 	stack.add_child(seat_select)
 	stack.add_child(_button("start", "Enter the realm  >", func() -> void:
@@ -427,9 +438,14 @@ func _build_decision_ui() -> void:
 	planning_hex = OptionButton.new()
 	plan_stack.add_child(planning_hex)
 	plan_stack.add_child(_label("Equipment · control a Settlement · up to 3 items", 13))
-	planning_purchase = OptionButton.new()
-	plan_stack.add_child(planning_purchase)
+	for slot: int in 3:
+		var purchase_choice := OptionButton.new()
+		plan_stack.add_child(purchase_choice)
+		planning_purchases.append(purchase_choice)
+		buttons["purchase_%d" % slot] = purchase_choice
+	planning_purchase = planning_purchases[0]
 	planning_dialog.confirmed.connect(_submit_plan)
+	buttons.plan_confirm = planning_dialog.get_ok_button()
 
 func _build_victory_ui() -> void:
 	victory_panel = _panel(Color("1c343d"), 30)
@@ -468,6 +484,7 @@ func _build_victory_ui() -> void:
 func _build_settings() -> void:
 	settings_dialog = AcceptDialog.new()
 	settings_dialog.title = "Settings · saved on this device"
+	buttons.settings_close = settings_dialog.get_ok_button()
 	add_child(settings_dialog)
 	var stack := VBoxContainer.new()
 	stack.custom_minimum_size.x = 420
@@ -489,6 +506,7 @@ func _build_settings() -> void:
 		row.add_child(slider)
 	var motion := CheckButton.new()
 	motion.text = "Reduced motion"
+	buttons.reduced_motion = motion
 	motion.button_pressed = preferences.values.reduced_motion
 	motion.toggled.connect(func(value: bool) -> void: preferences.set_value("reduced_motion", value); _apply_preferences())
 	stack.add_child(motion)
@@ -566,13 +584,16 @@ func _open_plan() -> void:
 		planning_hex.add_item("%s %s" % [id.to_upper(), options.prepared_hex_targets[id].name])
 		planning_hex.set_item_metadata(planning_hex.item_count - 1, id)
 	planning_hex.disabled = planning_hex.item_count == 1
-	planning_purchase.clear()
-	planning_purchase.add_item("No equipment purchase")
-	for id: String in options.get("purchases", {}):
-		var item: Dictionary = options.purchases[id]
-		planning_purchase.add_item("%s · %s Gold" % [item.get("name", id), item.get("cost", 4)])
-		planning_purchase.set_item_metadata(planning_purchase.item_count - 1, id)
-	planning_purchase.disabled = planning_purchase.item_count == 1
+	for slot: int in planning_purchases.size():
+		var choice: OptionButton = planning_purchases[slot]
+		choice.clear()
+		choice.add_item("Slot %d · no purchase" % (slot + 1))
+		for id: String in options.get("purchases", {}):
+			var item: Dictionary = options.purchases[id]
+			choice.add_item("%s · %s Gold" % [item.get("name", id), item.get("cost", 4)])
+			choice.set_item_metadata(choice.item_count - 1, id)
+			choice.get_popup().set_item_tooltip(choice.item_count - 1, item.get("description", ""))
+		choice.disabled = choice.item_count == 1 or slot >= int(options.get("slots", 0))
 	planning_dialog.popup_centered()
 
 func _submit_plan() -> void:
@@ -580,7 +601,10 @@ func _submit_plan() -> void:
 	if planning_push.button_pressed: plan.initiative_push = true
 	if planning_snare.selected > 0: plan.snare = planning_snare.get_item_metadata(planning_snare.selected)
 	if planning_hex.selected > 0: plan.prepared_hex = planning_hex.get_item_metadata(planning_hex.selected)
-	if planning_purchase.selected > 0: plan.purchases = [planning_purchase.get_item_metadata(planning_purchase.selected)]
+	var purchases: Array[String] = []
+	for choice: OptionButton in planning_purchases:
+		if not choice.disabled and choice.selected > 0: purchases.append(choice.get_item_metadata(choice.selected))
+	if not purchases.is_empty(): plan.purchases = purchases
 	_command({"type": "submit_plan", "player_id": planning_seat, "plan": plan})
 
 func _decision_player() -> String:
@@ -745,10 +769,10 @@ func _refresh_cards() -> void:
 	for id: String in state.heroes:
 		var hero: Dictionary = state.heroes[id]
 		var color: Color = Board.TEAM[int(id.substr(1)) - 1]
-		var panel := _panel(Color("263d42") if viewer == id else Color("1a2f37"), 7)
+		var panel := _panel(Color("263d42") if viewer == id else Color("1a2f37"), 5)
 		cards.add_child(panel)
 		var stack := VBoxContainer.new()
-		stack.add_theme_constant_override("separation", 2)
+		stack.add_theme_constant_override("separation", 1)
 		panel.add_child(stack)
 		var select := _button("seat_" + id, "%s   %s%s" % [id.to_upper(), hero.name, "  *" if rules.current_actor() == id else ""], func() -> void:
 			if local_mode != "solo": viewer = id
@@ -766,7 +790,7 @@ func _refresh_cards() -> void:
 		select.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		stack.add_child(select)
 		var recovering: bool = hero.statuses.has("recovering") or hero.statuses.has("Recovering")
-		stack.add_child(_label("HP %d/%d   ATK %d   DEF %d   SPD %d" % [hero.hp, hero.max_hp, hero.attack - int(recovering), hero.defence - int(recovering), hero.speed], 10, MUTED))
+		stack.add_child(_label("HP %d/%d   ATK %d   DEF %d   SPD %d" % [hero.hp, hero.max_hp, hero.attack + Equipment.passive_bonus(hero, "attack") - int(recovering), hero.defence + Equipment.passive_bonus(hero, "defence") - int(recovering), hero.speed], 10, MUTED))
 		if recovering: select.tooltip_text = "Recovering: untargetable until next World phase; -1 Attack and Defence. Scheduled actions are retained."
 		stack.add_child(_label("Gold %d    Power %d    Relics %d" % [hero.gold, hero.power, hero.relics.size()], 11))
 		var fate_row := HBoxContainer.new()
@@ -779,7 +803,7 @@ func _refresh_cards() -> void:
 			pip.color = color if index < hero.fate else Color("3d5156")
 			fate_row.add_child(pip)
 		var progress: Dictionary = rules.victory_progress(id)
-		stack.add_child(_label("Ancients %d/4 · Markets %d/2 · Relics %d/3" % [progress.conquest.controlled, progress.dominion.settlements, progress.ascension.relics], 10, color))
+		if viewer == id: stack.add_child(_label("Ancients %d/4 · Markets %d/2 · Relics %d/3" % [progress.conquest.controlled, progress.dominion.settlements, progress.ascension.relics], 10, color))
 		select.tooltip_text += "\nConquest: hold 4 Ancient Towers including Worldspire through the next Resolution.\nDominion: 2 Settlements, an unblocked road network and 15 Gold through next Resolution.\nAscension: 3 Relics, Begin and Complete Ritual at Worldspire."
 		if not hero.upgrades.is_empty(): select.tooltip_text += "\nEquipment: " + ", ".join(hero.upgrades)
 
@@ -820,10 +844,12 @@ func _refresh_actions() -> void:
 			var legal: Dictionary = rules.legal_actions(actor)
 			instruction.text = "%s · %s's action · select Move, then a highlighted hex." % [actor.to_upper(), state.heroes[actor].name]
 			var move_button := _button("move", "Move" + (" *" if move_mode else ""), func() -> void: target_mode = ""; move_mode = not move_mode; _refresh())
+			move_button.tooltip_text = "Spend your action traveling. Green rings show reachable hexes; hover for path and movement cost."
 			move_button.disabled = not legal.has("move")
 			actions.add_child(move_button)
 			var attack := _button("attack", "Attack", func() -> void: move_mode = false; target_mode = "attack"; _refresh())
 			attack.disabled = not legal.has("attack")
+			attack.tooltip_text = "Attack an adjacent hero or monster. Both participants choose a sealed stance before dice and Fate windows."
 			actions.add_child(attack)
 			var capture_label: String = "Complete capture" if legal.get("capture", {}).get("completing", false) else ("Begin capture" if legal.get("capture", {}).get("commitment", false) else "Capture")
 			var capture := _button("capture", capture_label, func() -> void: _command({"type": "capture", "player_id": actor}))
@@ -832,10 +858,13 @@ func _refresh_actions() -> void:
 			actions.add_child(capture)
 			var upgrade := _button("upgrade", "Upgrade", func() -> void: _command({"type": "upgrade", "player_id": actor}))
 			upgrade.disabled = not legal.has("upgrade")
+			upgrade.tooltip_text = "Upgrade the owned location you occupy: Level 2 costs 3 Gold (+1 Defence); Level 3 costs 5 Gold (+1 income)."
 			actions.add_child(upgrade)
 			if legal.has("explore"):
-				actions.add_child(_button("explore", "Explore", func() -> void: _command({"type": "explore", "player_id": actor})))
-				if state.heroes[actor].fate >= 2:
+				var explore := _button("explore", "Explore", func() -> void: _command({"type": "explore", "player_id": actor}))
+				explore.tooltip_text = legal.explore.get("description", "Collect unclaimed rewards here.")
+				actions.add_child(explore)
+				if legal.explore.get("alternatives_available", false):
 					actions.add_child(_button("explore_fate", "Explore · 2 Fate", func() -> void: _command({"type": "explore", "player_id": actor, "use_fate": true})))
 			for direction: String in legal.get("trade", {}).get("choices", {}):
 				var terms: Dictionary = legal.trade.choices[direction]
@@ -855,6 +884,8 @@ func _refresh_actions() -> void:
 			actions.add_child(_button("cancel", "Cancel", func() -> void: move_mode = false; target_mode = ""; _refresh()))
 			if target_mode == "attack": instruction.text = "%s · select an adjacent highlighted hero or monster to attack." % actor.to_upper()
 			if target_mode == "forced_march": instruction.text = "%s · Forced March: select a destination · 1 Power, +2 next-cycle initiative." % actor.to_upper()
+			if preferences.values.hints and state.round_number == 1 and target_mode.is_empty() and not move_mode:
+				feedback.text = "First move: select Move, then a green hex. Inspect nearby towers; Capture becomes available when you arrive."
 		"bonus":
 			instruction.text = "Both ordinary cycles are complete. No bonus actions are granted."
 			actions.add_child(_button("advance", "Continue to Resolution  >", func() -> void: _command({"type": "advance"})))
@@ -920,6 +951,8 @@ func _refresh_selection() -> void:
 			if rules.definitions.tower_traits.has(location.get("trait", "")):
 				var trait_definition: Dictionary = rules.definitions.tower_traits[location.trait]
 				value += "\n[color=#dec18a]%s[/color]: %s" % [trait_definition.name, trait_definition.description]
+			if location.get("exhausted", false): value += "\nExplored · no rewards remain."
+			if location.get("cleared", false): value += "\nCamp cleared."
 			for monster: Dictionary in state.get("monsters", {}).values():
 				if monster.hex == selected_hex:
 					value += "\n%s · HP %s/%s · DEF %s" % [monster.name, monster.hp, monster.max_hp, monster.defence]
@@ -929,7 +962,17 @@ func _refresh_selection() -> void:
 	for warning: Dictionary in state.get("traps", {}).values():
 		if warning.hex == selected_hex: value += "\n[color=#dec18a]Warning: a prepared trap is present.[/color]"
 	for id: String in state.get("commitments", {}):
-		if state.commitments[id].hex == selected_hex: value += "\n[color=#dec18a]%s is capturing. Complete on their next action.[/color]" % id.to_upper()
+		if state.commitments[id].hex == selected_hex: value += "\n[color=#dec18a]%s is %s. Complete on their next action.[/color]" % [id.to_upper(), "performing a Ritual" if state.commitments[id].kind == "ritual" else "capturing"]
+	if state.get("market_hex", "") == selected_hex: value += "\nWandering Market · Trade until Resolution."
+	if tile.has("movement_terrain"): value += "\nCursed Ground · movement uses Forest costs."
+	if state.get("ground_loot", {}).has(selected_hex): value += "\nUnclaimed loot · Explore to collect."
+	for hero: Dictionary in state.heroes.values():
+		if hero.hex != selected_hex: continue
+		value += "\n\n[b]%s[/b] · Relics %d/3" % [hero.name, hero.relics.size()]
+		if not hero.upgrades.is_empty(): value += "\nEquipment: " + ", ".join(hero.upgrades).replace("_", " ")
+		var tracks: Dictionary = rules.victory_progress(hero.id)
+		value += "\nAncients %d/4 · Settlements %d/2\nRoad network: %s · Gold %d/15" % [tracks.conquest.controlled, tracks.dominion.settlements, "connected" if tracks.dominion.connected else "incomplete", hero.gold]
+		if hero.id == viewer and hero.class_id == "cultist": value += "\nOccult hints: " + ", ".join(hero.get("occult_hint", {}).get("regions", []))
 	selected_panel.text = value
 
 func _refresh_journal() -> void:
@@ -1070,7 +1113,10 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_F3: _toggle_debug()
 		KEY_ESCAPE:
 			move_mode = false
-			debug_panel.hide()
+			if debug_panel.visible: debug_panel.hide()
+			elif cinematic.visible: cinematic.hide()
+			elif settings_dialog.visible: settings_dialog.hide()
+			else: settings_dialog.popup_centered()
 			_refresh()
 	_publish_bridge()
 
@@ -1081,11 +1127,13 @@ func _setup_bridge() -> void:
 	var command_callback := JavaScriptBridge.create_callback(_bridge_command)
 	var reset_callback := JavaScriptBridge.create_callback(_bridge_reset)
 	var inspect_callback := JavaScriptBridge.create_callback(_bridge_inspect)
-	bridge_callbacks = [command_callback, reset_callback, inspect_callback]
+	var propose_callback := JavaScriptBridge.create_callback(_bridge_propose)
+	bridge_callbacks = [command_callback, reset_callback, inspect_callback, propose_callback]
 	window.realmCommand = command_callback
 	window.realmReset = reset_callback
 	window.realmInspect = inspect_callback
-	JavaScriptBridge.eval("window.realm.command = c => { window.realmCommand(JSON.stringify(c)); return window.realm.lastResult; }; window.realm.reset = s => window.realmReset(s); window.realm.inspect = () => window.realmInspect();", true)
+	window.realmPropose = propose_callback
+	JavaScriptBridge.eval("window.realm.command = c => { window.realmCommand(JSON.stringify(c)); return window.realm.lastResult; }; window.realm.reset = s => window.realmReset(s); window.realm.inspect = () => window.realmInspect(); window.realm.propose = p => { window.realmPropose(JSON.stringify(p || {})); return window.realm.botCommand; };", true)
 	_publish_bridge()
 
 func _bridge_command(args: Array) -> void:
@@ -1103,6 +1151,11 @@ func _bridge_reset(args: Array) -> void:
 func _bridge_inspect(_args: Array) -> void:
 	_publish_bridge()
 
+func _bridge_propose(args: Array) -> void:
+	var preferences_value: Variant = JSON.parse_string(str(args[0])) if not args.is_empty() else {}
+	if not preferences_value is Dictionary: return
+	JavaScriptBridge.eval("window.realm.botCommand = %s;" % JSON.stringify(Bot.choose(rules, preferences_value)), true)
+
 func _publish_bridge() -> void:
 	if not OS.has_feature("web") or not OS.is_debug_build() or rules == null: return
 	var controls: Dictionary = {}
@@ -1110,6 +1163,8 @@ func _publish_bridge() -> void:
 		var button: Variant = buttons[id]
 		if not is_instance_valid(button) or not button.is_inside_tree() or not button.is_visible_in_tree(): continue
 		var rect: Rect2 = button.get_global_rect()
+		if button.get_window() != get_tree().root:
+			rect.position += Vector2(button.get_window().position)
 		controls[id] = {"x": rect.position.x, "y": rect.position.y, "width": rect.size.x, "height": rect.size.y, "disabled": button.disabled, "text": button.text}
 	var view_rect: Rect2 = viewport_container.get_global_rect()
 	var ui: Dictionary = {"controls": controls, "phase_title": phase_title.text, "instruction": instruction.text, "feedback": feedback.text, "selected": selected_hex, "move_mode": move_mode, "debug_visible": debug_panel.visible, "journal": log_text.get_parsed_text(), "viewport": {"x": view_rect.position.x, "y": view_rect.position.y, "width": view_rect.size.x, "height": view_rect.size.y}, "size": {"width": size.x, "height": size.y}, "hexes": board.projected_hexes(), "camera": {"yaw": board.yaw, "zoom": board.zoom, "x": board.focus_point.x, "z": board.focus_point.z}}
@@ -1117,4 +1172,12 @@ func _publish_bridge() -> void:
 	ui["decision_player"] = _decision_player()
 	ui["mode"] = local_mode
 	ui["human_seat"] = human_seat
+	ui["threats"] = threat_label.text
+	ui["victory_visible"] = victory_panel.visible
+	ui["victory_text"] = victory_text.text
+	ui["settings"] = preferences.values
+	ui["performance"] = {"fps": Engine.get_frames_per_second(), "nodes": Performance.get_monitor(Performance.OBJECT_NODE_COUNT), "draw_calls": Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)}
+	ui["handoff_visible"] = handoff.visible
+	ui["handoff_text"] = handoff_label.text
+	ui["planning_visible"] = planning_dialog.visible
 	JavaScriptBridge.eval("if(window.realm){window.realm.state = %s; window.realm.ui = %s; window.realm.lastResult = %s; window.realm.legal = %s;}" % [JSON.stringify(rules.snapshot()), JSON.stringify(ui), JSON.stringify(last_result), JSON.stringify(rules.legal_actions(actor) if not actor.is_empty() else {})], true)

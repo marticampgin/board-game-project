@@ -45,8 +45,16 @@ Four-bot baseline, seed `20260922`: **20 rounds, 691 accepted commands, 160 sche
 
 The Windows Desktop debug export launches with hardware OpenGL on NVIDIA RTX 4070 and exits cleanly after 90 frames. `build/windows/ShatteredRealm.exe` is a generated local artifact, excluded from Git. The native launch is a smoke test; the automated input flows run in Playwright.
 
-## Remaining scope and next playable task
+## Milestone 3 — complete local rules and match flow
 
-No remaining failing check is known for Milestones 0–2. No Milestone 3–5 completion is claimed. There is no match winner yet: settlement interactions, Trade, Ruins/exploration, world events, victory routes, remaining upgrade/class content, a save/load menu and multiplayer remain later work. CLI persistence and snapshot export already work.
+- Settlements, road networks, Trade, Ruins, rewards, Relics, five world events and all eight equipment upgrades.
+- Conquest and Dominion claims with a full response round; Ascension's two-action ritual; immediate invalidation when requirements are lost.
+- Fresh-game headless proofs for all three routes use only normal commands. No winner or starting resource is injected.
+- Initial 25-seed complete-match run: 25 finished, median 6 rounds, maximum 23; Ascension 12, Dominion 12, Conquest 1. Every final state replayed to the same checksum. Round-boundary persistence is also being checked across processes.
+- Actual Godot browser rendering reaches the final victory screen through each route: Conquest round 7, Dominion round 6, Ascension round 5.
+- Menu modes include solo with a selected human hero and three bots, sandbox and private hotseat. Playwright verifies the human seat does not act automatically.
+- Validated manual saves, round autosaves, rotating backup, saved mode/seat, and CLI interoperability. Settings and sound cues are outside the deterministic state.
 
-Next smallest playable task: implement Settlement Capture and Trade with road-network validation, then extend the same action/event loop toward Milestone 3's public victory claims.
+## Milestones 4–5 — active work
+
+The user expanded the request to complete all milestones. Presentation now includes visible claim/ritual threats, victory results, equipment controls, glossary, tooltips, private Planning handoffs, persistent audio/motion/scale settings and text-backed audio cues. The board's visual and performance pass, expanded browser acceptance and the ENet proof remain under active verification. Completion is recorded only after those checks pass.
