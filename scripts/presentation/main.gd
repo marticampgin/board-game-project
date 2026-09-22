@@ -9,6 +9,8 @@ const Bot = preload("res://scripts/domain/bots/simple_bot.gd")
 const Saves = preload("res://scripts/services/snapshot_store.gd")
 const Preferences = preload("res://scripts/services/preferences.gd")
 const Equipment = preload("res://scripts/domain/resolvers/equipment.gd")
+const RemoteView = preload("res://scripts/presentation/remote_rules_view.gd")
+const NetworkLobby = preload("res://scripts/presentation/network_lobby.gd")
 const PHASES: Array[String] = ["world", "planning", "initiative", "cycle_1", "cycle_2", "bonus", "resolution"]
 const INK := Color("eee8d8")
 const MUTED := Color("91aaa9")
@@ -72,6 +74,10 @@ var cinematic_text: Label
 var cinematic_seconds: float = 0.0
 var preferences: Node
 var settings_dialog: AcceptDialog
+var network: Node
+var network_lobby: AcceptDialog
+var network_event_sequence: int = 0
+var network_results: Array = []
 const MANUAL_SAVE := "user://saves/manual.json"
 const AUTO_SAVE := "user://saves/autosave.json"
 
@@ -187,6 +193,7 @@ func _build_ui() -> void:
 	header.add_child(_button("copy_seed", "Copy seed", func() -> void: DisplayServer.clipboard_set(seed_edit.text)))
 	header.add_child(_button("rules", "Rules", func() -> void: rules_dialog.popup_centered(Vector2i(650, 470))))
 	header.add_child(_button("settings", "Settings", func() -> void: settings_dialog.popup_centered()))
+	header.add_child(_button("online", "Online", func() -> void: network_lobby.popup_centered()))
 	header.add_child(_button("debug", "Debug  F3", _toggle_debug))
 	var phase_panel := _panel(Color("1d333a"), 10)
 	layout.add_child(phase_panel)
@@ -309,6 +316,7 @@ func _build_ui() -> void:
 	_build_decision_ui()
 	_build_victory_ui()
 	_build_settings()
+	_build_network_lobby()
 	rules_dialog = AcceptDialog.new()
 	rules_dialog.title = "The rules of the realm"
 	rules_dialog.dialog_text = "Each round: World > Planning > Initiative > two Action Cycles > Bonus > Resolution. Every hero acts once in each cycle. Initiative is Speed + d3.\n\nMove: 3 MP; road-only paths allow 4. Forest costs 2 (Ranger: 1). Swamp ends movement. Occupied and impassable hexes block paths.\n\nMinor Towers capture in one action; Ancient Towers need Begin then Complete on your next action. Towers pay Power at Resolution. Upgrades cost 3/5 Gold.\n\nCombat: select an adjacent target, choose sealed stances, then reveal. Assault +2; Guard +1 and reduces damage; Counter +3 against Assault, otherwise -1; Trick costs 1 Fate and gains +2 against Guard/Counter. Ties defend. Attacker rerolls first, then defender. Each reroll costs 1 Fate.\n\nFate caps at 5 and grows by 1 each Resolution. Planning offers Initiative Push, Ranger Snare and Cultist Prepared Hex. Downed heroes recover at Sanctuary and retain scheduled actions.\n\nGreen rings: Move. Red rings: Attack. Camera: WASD pan, Q/E rotate, wheel zoom, F/Home focus. Victory routes and exploration arrive in Milestone 3."
@@ -385,6 +393,7 @@ func _build_welcome() -> void:
 	seat_select.tooltip_text = "Your hero in Solo mode. All heroes remain inspectable."
 	stack.add_child(seat_select)
 	stack.add_child(_button("start", "Enter the realm  >", func() -> void:
+		if local_mode == "network": _leave_network()
 		local_mode = ["sandbox", "solo", "hotseat"][mode_select.selected]
 		human_seat = "p%d" % (seat_select.selected + 1)
 		viewer = human_seat if local_mode == "solo" else "p1"
@@ -529,6 +538,99 @@ func _build_settings() -> void:
 	stack.add_child(scale_choice)
 	stack.add_child(_label("Music bus is ready for a future soundtrack.\nAll important cues also appear as text in the Chronicle.", 12, MUTED))
 
+func _build_network_lobby() -> void:
+	network_lobby = NetworkLobby.new()
+	add_child(network_lobby)
+	network_lobby.host_requested.connect(_host_network)
+	network_lobby.join_requested.connect(_join_network)
+	network_lobby.start_requested.connect(func() -> void:
+		if network != null:
+			var result: Dictionary = network.start_match()
+			if not result.get("is_valid", result.get("ok", false)): network_lobby.show_error(result.get("message", str(result))))
+	network_lobby.leave_requested.connect(_leave_network)
+
+func _ensure_network() -> bool:
+	if OS.has_feature("web"): return false
+	if network != null: return true
+	var service: GDScript = load("res://scripts/network/network_session.gd")
+	if service == null: return false
+	network = service.new()
+	network.name = "NetworkSession"
+	add_child(network)
+	network.observation_updated.connect(_network_observation)
+	network.lobby_updated.connect(_network_lobby_updated)
+	network.command_result.connect(_network_result)
+	network.connection_failed.connect(func(message: String) -> void: network_lobby.show_error(message); feedback.text = message)
+	return true
+
+func _host_network(port: int) -> void:
+	if not _ensure_network(): return
+	local_mode = "network"
+	network_event_sequence = 0
+	network_results.clear()
+	var seed_value: int = int(seed_edit.text) if seed_edit.text.is_valid_int() else 20260922
+	var error: Error = network.host_game(port, seed_value)
+	if error != OK:
+		_leave_network()
+		network_lobby.show_error("Cannot host: " + error_string(error))
+
+func _join_network(address: String, port: int, token: String) -> void:
+	if not _ensure_network(): return
+	local_mode = "network"
+	network_event_sequence = 0
+	network_results.clear()
+	var error: Error = network.join_game(address, port, token)
+	if error != OK:
+		_leave_network()
+		network_lobby.show_error("Cannot connect: " + error_string(error))
+	else: network_lobby.status.text = "Connecting to %s:%d…" % [address, port]
+
+func _network_lobby_updated(lobby: Dictionary) -> void:
+	if network == null: return
+	network_lobby.update_lobby(lobby, network.is_host, network.local_player_id, network.reconnect_token)
+
+func _network_observation(view: Dictionary) -> void:
+	if view.get("state", {}).is_empty(): return
+	var first: bool = not rules is RemoteView
+	var was_started: bool = started
+	if first:
+		rules = RemoteView.new(view)
+		board.build(rules.state.data.map)
+	else: rules.update(view)
+	viewer = str(view.player_id)
+	human_seat = viewer
+	local_mode = "network"
+	started = bool(view.get("started", false))
+	selected_hex = "" if first else selected_hex
+	move_mode = false
+	target_mode = ""
+	seed_edit.text = "Host realm"
+	var events: Array = []
+	for event: Dictionary in rules.state.data.get("events", []):
+		if int(event.sequence) > network_event_sequence: events.append(event)
+		network_event_sequence = maxi(network_event_sequence, int(event.sequence))
+	_refresh(events)
+	if started:
+		welcome.hide()
+		if first or not was_started: network_lobby.hide()
+		if rules.state.data.phase == "victory": _show_victory()
+	_network_lobby_updated(view.get("lobby", {}))
+
+func _network_result(result: Dictionary) -> void:
+	last_result = result.duplicate(true)
+	network_results.append({"source": "network", "result": result.duplicate(true), "received_at": Time.get_datetime_string_from_system(true)})
+	feedback.text = "%s · %s" % [result.get("reason_code", "Network"), result.get("message", "Host response received")]
+	_publish_bridge()
+
+func _leave_network() -> void:
+	if network != null: network.disconnect_session()
+	local_mode = "sandbox"
+	started = false
+	network_event_sequence = 0
+	_new_game(20260922)
+	welcome.show()
+	network_lobby.hide()
+
 func _apply_preferences() -> void:
 	reduced_motion = preferences.values.reduced_motion
 	board.motion = not reduced_motion
@@ -546,7 +648,7 @@ func _refresh_victory(events: Array) -> void:
 	for id: String in state.get("commitments", {}):
 		if state.commitments[id].kind == "ritual": threats.append("%s is performing the Ascension Ritual — interrupt before their next action" % id.to_upper())
 	threat_label.text = "  |  ".join(threats)
-	threat_label.visible = not threats.is_empty()
+	threat_label.visible = not threats.is_empty() and state.phase != "victory"
 	if state.phase != "victory": victory_panel.hide()
 	for event: Dictionary in events:
 		if event.type in ["VictoryClaimCreated", "VictoryClaimCanceled", "RitualBegun", "RitualCanceled"]:
@@ -561,6 +663,7 @@ func _refresh_victory(events: Array) -> void:
 func _show_victory() -> void:
 	var victory: Dictionary = rules.state.data.get("victory", {})
 	if victory.is_empty(): return
+	cinematic.hide()
 	var names: PackedStringArray = []
 	for id: String in victory.winners: names.append("%s · %s" % [id.to_upper(), rules.state.data.heroes[id].name])
 	victory_text.text = "%s\n\n%s victory · Round %d\n\n%d commands tell the story of this realm." % [" & ".join(names), String(victory.route).capitalize(), victory.round, rules.state.data.command_sequence]
@@ -640,7 +743,7 @@ func _refresh_decision_actions(actor: String) -> void:
 			var button := _button("stance_" + stance, stance.capitalize(), func() -> void: _command({"type": "choose_stance", "player_id": actor, "stance": stance}))
 			button.tooltip_text = descriptions.get(stance, "")
 			actions.add_child(button)
-		if decision_ack != _decision_key() and local_mode != "solo":
+		if decision_ack != _decision_key() and local_mode not in ["solo", "network"]:
 			_handoff_for(actor, _decision_key())
 	elif legal.has("resolve_reaction"):
 		var reaction: Dictionary = rules.state.data.get("pending_reaction", {})
@@ -683,6 +786,9 @@ func _new_game(seed_value: int) -> void:
 	_refresh()
 
 func _regenerate() -> void:
+	if local_mode == "network":
+		feedback.text = "Leave the online session before generating a local game."
+		return
 	if not seed_edit.text.is_valid_int():
 		feedback.text = "Enter an integer seed."
 		return
@@ -695,6 +801,9 @@ func _regenerate() -> void:
 
 func _command(command: Dictionary, source: String = "presentation") -> Dictionary:
 	command["expected_version"] = rules.state.data.state_version if not command.has("expected_version") else command.expected_version
+	if local_mode == "network":
+		network.submit(command)
+		return last_result
 	last_result = logger.execute(rules, command, source)
 	if last_result.is_valid:
 		move_mode = false
@@ -725,7 +834,9 @@ func _refresh(events: Array = []) -> void:
 			if id not in state.ready:
 				viewer = id
 				break
-	session_label.text = "SOLO · %s + 3 BOTS" % human_seat.to_upper() if local_mode == "solo" else ("HOTSEAT · FOUR HUMANS" if local_mode == "hotseat" else "LOCAL · ALL FOUR SEATS")
+	session_label.text = "ONLINE · %s" % viewer.to_upper() if local_mode == "network" else ("SOLO · %s + 3 BOTS" % human_seat.to_upper() if local_mode == "solo" else ("HOTSEAT · FOUR HUMANS" if local_mode == "hotseat" else "LOCAL · ALL FOUR SEATS"))
+	for id: String in ["save_game", "load_game", "regenerate", "copy_seed", "snapshot", "bot_step", "debug_advance", "same_seed"]:
+		buttons[id].disabled = local_mode == "network"
 	phase_title.text = "ROUND %02d  /  %s" % [state.round_number, String(state.phase).replace("_", " ").to_upper()]
 	_clear(phase_steps)
 	for phase: String in PHASES:
@@ -775,7 +886,7 @@ func _refresh_cards() -> void:
 		stack.add_theme_constant_override("separation", 1)
 		panel.add_child(stack)
 		var select := _button("seat_" + id, "%s   %s%s" % [id.to_upper(), hero.name, "  *" if rules.current_actor() == id else ""], func() -> void:
-			if local_mode != "solo": viewer = id
+			if local_mode not in ["solo", "network"]: viewer = id
 			selected_hex = rules.state.data.heroes[id].hex
 			board.selected = selected_hex
 			board.focus_hex(selected_hex)
@@ -818,6 +929,16 @@ func _refresh_actions() -> void:
 			return
 		_refresh_decision_actions(decision)
 		return
+	if local_mode == "network":
+		if not network.started:
+			instruction.text = "Online lobby · the host will start the match."
+			return
+		if not state.get("pending_combat", {}).is_empty() or not state.get("pending_reaction", {}).is_empty() or not state.get("pending_exploration", {}).is_empty():
+			instruction.text = "Waiting for another player's decision."
+			return
+		if state.phase in ["world", "initiative", "bonus", "resolution"]:
+			instruction.text = "The host is resolving %s…" % state.phase
+			return
 	match state.phase:
 		"world":
 			instruction.text = "A new round begins. Survey the realm, then prepare your plans."
@@ -827,7 +948,7 @@ func _refresh_actions() -> void:
 			for id: String in state.heroes:
 				var ready: bool = id in state.ready
 				var button := _button("ready_" + id, "%s %s" % [id.to_upper(), "Ready OK" if ready else "Ready"], func() -> void: _command({"type": "ready", "player_id": id}))
-				button.disabled = ready or (local_mode == "solo" and id != human_seat) or (local_mode == "hotseat" and id != viewer)
+				button.disabled = ready or (local_mode == "solo" and id != human_seat) or (local_mode in ["hotseat", "network"] and id != viewer)
 				actions.add_child(button)
 			var plan_button := _button("plan", "Plan for %s" % viewer.to_upper(), _open_plan)
 			plan_button.disabled = viewer in state.ready
@@ -838,7 +959,7 @@ func _refresh_actions() -> void:
 			actions.add_child(_button("advance", "Begin Action Cycle 1  >", func() -> void: _command({"type": "advance"})))
 		"cycle_1", "cycle_2":
 			var actor: String = rules.current_actor()
-			if local_mode == "solo" and actor != human_seat:
+			if (local_mode == "solo" and actor != human_seat) or (local_mode == "network" and actor != viewer):
 				instruction.text = "%s · %s is taking their action…" % [actor.to_upper(), state.heroes[actor].name]
 				return
 			var legal: Dictionary = rules.legal_actions(actor)
@@ -895,7 +1016,8 @@ func _refresh_actions() -> void:
 		"victory":
 			var victory: Dictionary = state.get("victory", {})
 			instruction.text = "%s wins · %s · Round %s" % [", ".join(victory.get("winners", [])), String(victory.get("route", "victory")).capitalize(), victory.get("round", state.round_number)]
-			actions.add_child(_button("new_match", "Play another realm", func() -> void: _new_game(int(seed_edit.text) + 1); welcome.show()))
+			if local_mode == "network": actions.add_child(_button("leave_match", "Leave online match", _leave_network))
+			else: actions.add_child(_button("new_match", "Play another realm", func() -> void: _new_game(int(seed_edit.text) + 1); welcome.show()))
 			actions.add_child(_button("victory_log", "Export match log", _export_log))
 
 func _select_hex(hex: String) -> void:
@@ -1012,7 +1134,7 @@ func _event_description(event: Dictionary) -> String:
 func _refresh_debug() -> void:
 	if not debug_panel.visible: return
 	var state: Dictionary = rules.state.data
-	debug_text.text = "[b]Seed[/b] %s    [b]FPS[/b] %d    [b]Version[/b] %s\n[b]Round / Phase / Cycle[/b] %s / %s / %s\n[b]Actor[/b] %s  [b]Selection[/b] %s\n[b]Checksum[/b]\n%s\n[b]RNG[/b] %s\n[b]Generation[/b] %s\n[b]Path[/b] %s\n[b]Log[/b] %s" % [state.master_seed, Engine.get_frames_per_second(), state.state_version, state.round_number, state.phase, state.action_cycle, rules.current_actor(), selected_hex, rules.checksum(), JSON.stringify(state.rng), JSON.stringify(state.map.report), hover_label.text, "user://logs/actions.jsonl"]
+	debug_text.text = "[b]Seed[/b] %s    [b]FPS[/b] %d    [b]Version[/b] %s\n[b]Round / Phase / Cycle[/b] %s / %s / %s\n[b]Actor[/b] %s  [b]Selection[/b] %s\n[b]Checksum[/b]\n%s\n[b]RNG[/b] %s\n[b]Generation[/b] %s\n[b]Path[/b] %s\n[b]Log[/b] %s" % [state.get("master_seed", "Host only"), Engine.get_frames_per_second(), state.state_version, state.round_number, state.phase, state.action_cycle, rules.current_actor(), selected_hex, rules.checksum(), JSON.stringify(state.get("rng", {})), JSON.stringify(state.map.get("report", {})), hover_label.text, "user://logs/actions.jsonl"]
 
 func _toggle_debug() -> void:
 	debug_panel.visible = not debug_panel.visible
@@ -1076,6 +1198,11 @@ func _load_game(path: String) -> void:
 
 func _export_log() -> void:
 	var text_value: String = logger.to_jsonl()
+	if local_mode == "network":
+		var lines: PackedStringArray = []
+		for result: Dictionary in network_results: lines.append(JSON.stringify(result))
+		lines.append(JSON.stringify({"source": "authorized_view", "snapshot": rules.snapshot(), "checksum": rules.checksum()}))
+		text_value = "\n".join(lines) + "\n"
 	if OS.has_feature("web"):
 		JavaScriptBridge.download_buffer(text_value.to_utf8_buffer(), "shattered-realm-actions.jsonl", "application/x-ndjson")
 	else:
@@ -1177,6 +1304,7 @@ func _publish_bridge() -> void:
 	ui["victory_text"] = victory_text.text
 	ui["settings"] = preferences.values
 	ui["performance"] = {"fps": Engine.get_frames_per_second(), "nodes": Performance.get_monitor(Performance.OBJECT_NODE_COUNT), "draw_calls": Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)}
+	ui["performance"]["board"] = board.debug_metrics()
 	ui["handoff_visible"] = handoff.visible
 	ui["handoff_text"] = handoff_label.text
 	ui["planning_visible"] = planning_dialog.visible
