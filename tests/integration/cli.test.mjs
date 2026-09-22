@@ -45,7 +45,8 @@ test('CLI persists shared rules, records rejected attempts, simulates and verifi
     assert.equal(rejectedOnly.length, 2);
     assert.ok(rejectedOnly.every(entry => !entry.accepted));
     const incomeOnly = invoke(state, ['logs', '--event', 'IncomeGranted', '--limit', '1000']);
-    assert.equal(incomeOnly.length, 3);
+    assert.ok(incomeOnly.length > 0 && incomeOnly.length <= 3);
+    assert.deepEqual(incomeOnly, entries.filter(entry => entry.events.some(event => event.type === 'IncomeGranted')));
     assert.ok(incomeOnly.every(entry => entry.events.some(event => event.type === 'IncomeGranted')));
     for (const entry of entries) {
       assert.match(entry.checksum_before, /^[a-f0-9]{64}$/);
@@ -84,6 +85,13 @@ test('conflict action aliases submit their documented command payloads', { timeo
       { args: ['forced-march', 'p2', '0,1'], command: { type: 'special', player_id: 'p2', special_id: 'forced_march', target: '0,1' } },
       { args: ['special', 'p2', 'forced_march', '0,1'], command: { type: 'special', player_id: 'p2', special_id: 'forced_march', target: '0,1' } },
       { args: ['upgrade', 'p1'], command: { type: 'upgrade', player_id: 'p1' } },
+      { args: ['trade', 'p3', 'power_to_gold'], command: { type: 'trade', player_id: 'p3', direction: 'power_to_gold' } },
+      { args: ['explore', 'p1', '--use-fate'], command: { type: 'explore', player_id: 'p1', use_fate: true } },
+      { args: ['reward', 'p1', 'gold_cache'], command: { type: 'choose_reward', player_id: 'p1', choice: 'gold_cache' } },
+      { args: ['purchase', 'p1', 'iron_weapon'], command: { type: 'submit_plan', player_id: 'p1', plan: { purchases: ['iron_weapon'] } } },
+      { args: ['dark-bargain', 'p4'], command: { type: 'special', player_id: 'p4', special_id: 'dark_bargain' } },
+      { args: ['begin-ritual', 'p1'], command: { type: 'begin_ritual', player_id: 'p1' } },
+      { args: ['complete-ritual', 'p1'], command: { type: 'complete_ritual', player_id: 'p1' } },
     ];
     for (const { args } of commands) {
       const response = invoke(state, args, 2);

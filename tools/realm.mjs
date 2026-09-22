@@ -24,6 +24,13 @@ const help = `Shattered Realm — the same Godot rules from your terminal
   npm run cli -- special p2 forced_march 0,1
   npm run cli -- rest p1
   npm run cli -- upgrade p1
+  npm run cli -- trade p3 power_to_gold
+  npm run cli -- explore p1 [--use-fate]
+  npm run cli -- reward p1 reward_id
+  npm run cli -- purchase p1 iron_weapon
+  npm run cli -- dark-bargain p4
+  npm run cli -- begin-ritual p1
+  npm run cli -- complete-ritual p1
   npm run cli -- pass p1
   npm run cli -- command '{"type":"move","player_id":"p1","target":"0,1"}'
   npm run cli -- command --file command.json
@@ -47,7 +54,7 @@ function parseArgs(args) {
     const value = args[index];
     if (!value.startsWith('--')) { positional.push(value); continue; }
     const key = value.slice(2);
-    if (key === 'json' || key === 'help' || key === 'rejected') { options[key] = true; continue; }
+    if (key === 'json' || key === 'help' || key === 'rejected' || key === 'use-fate') { options[key] = true; continue; }
     if (!valueFlags.has(key)) throw new Error(`Unknown option ${value}.`);
     if (index + 1 === args.length) throw new Error(`Missing value for ${value}.`);
     options[key] = args[++index];
@@ -129,8 +136,8 @@ async function main() {
     return;
   }
   const request = { operation, log_path: logFile };
-  const canonicalNames = { plan: 'submit_plan', stance: 'choose_stance', fate: 'spend_fate', 'decline-fate': 'decline_fate', reaction: 'resolve_reaction', rest: 'special', 'forced-march': 'special' };
-  const aliases = new Set(['advance', 'ready', 'move', 'capture', 'pass', 'plan', 'submit_plan', 'attack', 'stance', 'choose_stance', 'fate', 'spend_fate', 'decline-fate', 'decline_fate', 'displace', 'reaction', 'resolve_reaction', 'special', 'rest', 'forced-march', 'upgrade']);
+  const canonicalNames = { plan: 'submit_plan', purchase: 'submit_plan', stance: 'choose_stance', fate: 'spend_fate', 'decline-fate': 'decline_fate', reaction: 'resolve_reaction', rest: 'special', 'forced-march': 'special', 'dark-bargain': 'special', reward: 'choose_reward', 'choose-reward': 'choose_reward', 'begin-ritual': 'begin_ritual', 'complete-ritual': 'complete_ritual' };
+  const aliases = new Set(['advance', 'ready', 'move', 'capture', 'pass', 'plan', 'submit_plan', 'attack', 'stance', 'choose_stance', 'fate', 'spend_fate', 'decline-fate', 'decline_fate', 'displace', 'reaction', 'resolve_reaction', 'special', 'rest', 'forced-march', 'upgrade', 'trade', 'explore', 'reward', 'choose-reward', 'choose_reward', 'purchase', 'dark-bargain', 'begin-ritual', 'complete-ritual', 'begin_ritual', 'complete_ritual']);
   if (aliases.has(operation) || operation === 'command') {
     let command;
     if (operation === 'command') command = options.file ? await readJson(path.resolve(options.file)) : JSON.parse(player ?? '{}');
@@ -141,12 +148,16 @@ async function main() {
       if (command.type === 'attack') command.target_id = value ?? '';
       if (command.type === 'choose_stance') command.stance = value ?? '';
       if (command.type === 'resolve_reaction') command.choice = value ?? 'decline';
+      if (command.type === 'trade') command.direction = value ?? '';
+      if (command.type === 'explore' && options['use-fate']) command.use_fate = true;
+      if (command.type === 'choose_reward') command.choice = value ?? '';
       if (command.type === 'special') {
-        command.special_id = operation === 'rest' ? 'rest' : operation === 'forced-march' ? 'forced_march' : value;
+        command.special_id = operation === 'rest' ? 'rest' : operation === 'forced-march' ? 'forced_march' : operation === 'dark-bargain' ? 'dark_bargain' : value;
         const target = operation === 'forced-march' ? value : positional[3];
         if (target) command.target = target;
       }
       if (operation === 'plan' || operation === 'submit_plan') command.plan = JSON.parse(value ?? '{}');
+      if (operation === 'purchase') command.plan = { purchases: (value ?? '').split(',').filter(Boolean) };
     }
     if (!command || typeof command !== 'object' || Array.isArray(command)) throw new Error('Command must be a JSON object.');
     if (options['expected-version'] !== undefined) command.expected_version = integer(options['expected-version'], 0, 'expected-version');

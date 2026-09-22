@@ -7,6 +7,10 @@ const AcceptanceTests = preload("res://tests/integration/test_acceptance.gd")
 const CombatTests = preload("res://tests/unit/test_combat.gd")
 const BotTests = preload("res://tests/integration/test_bots.gd")
 const Milestone2Tests = preload("res://tests/unit/test_milestone2.gd")
+const PersistenceTests = preload("res://tests/unit/test_persistence.gd")
+const Milestone3Tests = preload("res://tests/unit/test_milestone3.gd")
+const VictoryRouteTests = preload("res://tests/integration/test_victory_routes.gd")
+const CompleteMatchTests = preload("res://tests/integration/test_complete_matches.gd")
 
 func _initialize() -> void:
 	var failures: Array[String] = []
@@ -22,8 +26,12 @@ func _initialize() -> void:
 		{"id": "rules", "name": "rules and state serialization", "script": RulesTests},
 		{"id": "combat", "name": "combat stance matrix and outcome bands", "script": CombatTests},
 		{"id": "milestone2", "name": "conflict, Fate, class timing and recovery", "script": Milestone2Tests},
+		{"id": "persistence", "name": "atomic snapshots and recovery", "script": PersistenceTests},
+		{"id": "milestone3", "name": "economy, equipment and victory timing", "script": Milestone3Tests},
 		{"id": "acceptance", "name": "three-round vertical slice and replay", "script": AcceptanceTests},
-		{"id": "bots", "name": "20-round four-bot conflict and replay", "script": BotTests}
+		{"id": "bots", "name": "20-round four-bot conflict or victory and replay", "script": BotTests},
+		{"id": "victory_routes", "name": "fresh-command proof of all three victory routes", "script": VictoryRouteTests},
+		{"id": "complete_matches", "name": "25 complete deterministic bot matches", "script": CompleteMatchTests}
 	]
 	for suite: Dictionary in suites:
 		if not selected.is_empty() and suite["id"] != selected: continue

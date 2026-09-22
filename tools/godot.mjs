@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -31,12 +31,30 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (!Object.hasOwn(modes, action)) throw new Error(`Unknown mode ${action}; use play, check, or test.`);
     if (!existsSync(path.join(projectRoot, 'project.godot'))) throw new Error('project.godot is missing.');
     const args = [...modes[action], ...(process.argv.length > 3 ? ['--', ...process.argv.slice(3)] : [])];
-    const result = spawnSync(findGodot(), args, { cwd: projectRoot, encoding: 'utf8', windowsHide: true, stdio: action === 'play' ? 'inherit' : 'pipe', maxBuffer: 16 * 1024 * 1024 });
-    if (result.error) throw result.error;
-    if (result.stdout) process.stdout.write(result.stdout);
-    if (result.stderr) process.stderr.write(result.stderr);
-    // Godot's editor can exit zero after a script import failure. Treat engine errors as failures too.
-    process.exitCode = /(?:SCRIPT ERROR:|\bERROR:)/.test(`${result.stdout ?? ''}\n${result.stderr ?? ''}`) ? 1 : (result.status ?? 1);
+    if (action === 'play') {
+      const result = spawnSync(findGodot(), args, { cwd: projectRoot, windowsHide: true, stdio: 'inherit' });
+      if (result.error) throw result.error;
+      process.exitCode = result.status ?? 1;
+    } else {
+      // Stream long simulation suites so developers can see the seed currently under test.
+      const child = spawn(findGodot(), args, { cwd: projectRoot, windowsHide: true, stdio: ['inherit', 'pipe', 'pipe'] });
+      let engineError = false;
+      let diagnosticTail = '';
+      const forward = (chunk, output) => {
+        output.write(chunk);
+        const text = diagnosticTail + chunk.toString();
+        engineError ||= /(?:SCRIPT ERROR:|\bERROR:)/.test(text);
+        diagnosticTail = text.slice(-80);
+      };
+      child.stdout.on('data', chunk => forward(chunk, process.stdout));
+      child.stderr.on('data', chunk => forward(chunk, process.stderr));
+      const status = await new Promise((resolve, reject) => {
+        child.on('error', reject);
+        child.on('close', resolve);
+      });
+      // Godot's editor can exit zero after a script import failure.
+      process.exitCode = engineError ? 1 : (status ?? 1);
+    }
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

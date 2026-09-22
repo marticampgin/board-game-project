@@ -74,6 +74,8 @@ static func format_entry(entry: Dictionary) -> String:
 	return "\n".join(lines)
 
 static func _decision_label(snapshot: Dictionary) -> String:
+	if not snapshot.get("pending_exploration", {}).is_empty(): return "exploration:reward"
+	if not snapshot.get("victory", {}).is_empty(): return "victory"
 	var reaction: Dictionary = snapshot.get("pending_reaction", {})
 	if not reaction.is_empty():
 		return "reaction:" + str(reaction.get("kind", ""))

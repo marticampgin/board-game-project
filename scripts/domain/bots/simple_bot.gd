@@ -5,9 +5,11 @@ extends RefCounted
 
 const Movement = preload("res://scripts/domain/resolvers/movement.gd")
 const Hex = preload("res://scripts/domain/hex/hex.gd")
+const Objectives = preload("res://scripts/domain/bots/objective_policy.gd")
 
-static func choose(rules: RefCounted) -> Dictionary:
+static func choose(rules: RefCounted, preferences: Dictionary = {}) -> Dictionary:
 	var state: Dictionary = rules.snapshot()
+	if state["phase"] == "victory" or not state.get("victory", {}).is_empty(): return {}
 	var players: Array = state["heroes"].keys()
 	players.sort()
 	var options: Dictionary = {}
@@ -25,17 +27,32 @@ static func choose(rules: RefCounted) -> Dictionary:
 		for player: String in players:
 			var legal: Dictionary = options[player]
 			if legal.has("submit_plan") and not state["plans"].has(player):
-				return {"type": "submit_plan", "player_id": player, "plan": _plan(state, player, legal["submit_plan"])}
+				return {"type": "submit_plan", "player_id": player, "plan": _plan(state, player, legal["submit_plan"], str(preferences.get(player, "")))}
 			if legal.has("ready"):
 				return {"type": "ready", "player_id": player}
 		return {}
 	var actor: String = rules.current_actor()
 	if actor.is_empty() or not options.has(actor):
 		return {}
+	if state.has("victory"):
+		return Objectives.choose(state, actor, options[actor], rules.victory_progress(actor), str(preferences.get(actor, "")))
 	return _action(state, actor, options[actor])
 
 static func _window_choice(state: Dictionary, player: String, legal: Dictionary) -> Dictionary:
 	var hero: Dictionary = state["heroes"][player]
+	if legal.has("choose_reward"):
+		var choices: Dictionary = legal["choose_reward"].get("choices", {})
+		var ids: Array = choices.keys()
+		ids.sort()
+		var selected: String = ""
+		var best: int = -100000
+		for reward_id: String in ids:
+			var reward: Dictionary = choices[reward_id]
+			var score: int = int(reward.get("relics", 0)) * 100 + int(reward.get("gold", 0)) * 3 + int(reward.get("power", 0)) * 2 + int(reward.get("fate", 0)) * 2
+			if score > best:
+				best = score
+				selected = reward_id
+		if not selected.is_empty(): return {"type": "choose_reward", "player_id": player, "choice": selected}
 	if legal.has("resolve_reaction"):
 		var reaction: Dictionary = state.get("pending_reaction", {})
 		var accept: bool = str(reaction.get("kind", "")) == "challenge"
@@ -77,8 +94,9 @@ static func _window_choice(state: Dictionary, player: String, legal: Dictionary)
 			return {"type": "displace", "player_id": player, "target": destination}
 	return {}
 
-static func _plan(state: Dictionary, player: String, options: Dictionary) -> Dictionary:
+static func _plan(state: Dictionary, player: String, options: Dictionary, preference: String = "") -> Dictionary:
 	var hero: Dictionary = state["heroes"][player]
+	if preference == "passive": return {}
 	var plan: Dictionary = {}
 	if bool(options.get("initiative_push", false)) and int(hero["fate"]) >= 4:
 		plan["initiative_push"] = true
@@ -104,6 +122,19 @@ static func _plan(state: Dictionary, player: String, options: Dictionary) -> Dic
 		for enemy: String in hex_targets:
 			if int(state["heroes"][enemy]["attack"]) > int(state["heroes"][target]["attack"]): target = enemy
 		plan["prepared_hex"] = target
+	var purchases: Dictionary = options.get("purchases", {})
+	var owned: Array = hero.get("upgrades", [])
+	var keep_gold: int = 15 if Objectives.route(hero, preference) == "dominion" else 2
+	var available: int = int(hero["gold"]) - keep_gold
+	var selected: Array[String] = []
+	var priorities: Array[String] = ["iron_weapon", "reinforced_armor", "trail_boots", "ward_stone", "lucky_charm", "scout_lens"]
+	for upgrade_id: String in priorities:
+		if not purchases.has(upgrade_id) or owned.has(upgrade_id): continue
+		var cost: int = int(purchases[upgrade_id].get("cost", 4))
+		if cost > available or selected.size() >= int(options.get("slots", 0)): continue
+		available -= cost
+		selected.append(upgrade_id)
+	if not selected.is_empty(): plan["purchases"] = selected
 	return plan
 
 static func _action(state: Dictionary, player: String, legal: Dictionary) -> Dictionary:

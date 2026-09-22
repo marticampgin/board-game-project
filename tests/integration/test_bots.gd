@@ -22,7 +22,7 @@ func _test_twenty_rounds(seed_value: int) -> void:
 	var pending_stages_saved: Dictionary = {}
 	var guards: int = 0
 	var commands_per_round: Dictionary = {}
-	while int(rules.state.data["round_number"]) <= 20 and attempts < 2400:
+	while int(rules.state.data["round_number"]) <= 20 and attempts < 2400 and rules.state.data.get("victory", {}).is_empty():
 		var version: int = int(rules.state.data["state_version"])
 		var command: Dictionary = SimpleBot.choose(rules)
 		if command.is_empty():
@@ -70,11 +70,13 @@ func _test_twenty_rounds(seed_value: int) -> void:
 			if kind == "ActionCompleted":
 				var key: String = "%s:%s:%s" % [event["round"], event["data"].get("cycle", -1), event["actor_id"]]
 				actions[key] = int(actions.get(key, 0)) + 1
-	_check(int(rules.state.data["round_number"]) == 21, "Four bots did not finish 20 full rounds")
-	_check(rules.state.data["phase"] == "world", "Bot stop point is not the next World phase")
+	var won: bool = not rules.state.data.get("victory", {}).is_empty()
+	_check(int(rules.state.data["round_number"]) == 21 or won, "Four bots did not finish 20 rounds or reach a legitimate victory")
+	_check(rules.state.data["phase"] in ["world", "victory"], "Bot stop point is not World or Victory")
 	_check(rules.state.data.get("pending_combat", {}).is_empty(), "Bot stop point has an unresolved combat")
 	_check(rules.state.data.get("pending_reaction", {}).is_empty(), "Bot stop point has an unresolved reaction")
-	for round_number: int in range(1, 21):
+	var completed_rounds: int = mini(20, int(rules.state.data["round_number"]) - 1)
+	for round_number: int in range(1, completed_rounds + 1):
 		for cycle: int in [1, 2]:
 			for player: String in ["p1", "p2", "p3", "p4"]:
 				var key: String = "%s:%s:%s" % [round_number, cycle, player]
@@ -90,4 +92,4 @@ func _test_twenty_rounds(seed_value: int) -> void:
 			errors.append("20-round replay rejected " + JSON.stringify(command))
 			return
 	_check(replay.checksum() == rules.checksum(), "20-round replay diverged in state, events, or RNG")
-	print("Bot simulation: seed %s, 20 rounds, %s commands, %s combats, %s captures, %s saved decision stages; checksum %s" % [seed_value, attempts, event_counts.get("CombatResolved", 0), event_counts.get("LocationCaptured", 0), pending_stages_saved.size(), rules.checksum()])
+	print("Bot simulation: seed %s, %s complete rounds%s, %s commands, %s combats, %s captures, %s saved decision stages; checksum %s" % [seed_value, completed_rounds, " and victory" if won else "", attempts, event_counts.get("CombatResolved", 0), event_counts.get("LocationCaptured", 0), pending_stages_saved.size(), rules.checksum()])

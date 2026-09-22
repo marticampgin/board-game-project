@@ -93,13 +93,14 @@ func _handle(request: Dictionary) -> Dictionary:
 	return response
 
 func _simulate(rules: RefCounted, rounds: int) -> Dictionary:
-	var end_round: int = int(rules.snapshot()["round_number"]) + rounds
+	var start_round: int = int(rules.snapshot()["round_number"])
+	var end_round: int = start_round + rounds
 	var attempts: int = 0
 	var maximum: int = rounds * 120 + 120
 	var action_counts: Dictionary = {}
 	var event_counts: Dictionary = {}
 	var commands_per_round: Dictionary = {}
-	while int(rules.snapshot()["round_number"]) < end_round and attempts < maximum:
+	while int(rules.snapshot()["round_number"]) < end_round and attempts < maximum and rules.state.data.get("victory", {}).is_empty():
 		var state: Dictionary = rules.snapshot()
 		var command: Dictionary = SimpleBot.choose(rules)
 		if command.is_empty():
@@ -121,7 +122,9 @@ func _simulate(rules: RefCounted, rounds: int) -> Dictionary:
 				return {"ok": false, "error": "Combat calculation failed.", "details": event["data"], "attempts": attempts}
 			event_counts[kind] = int(event_counts.get(kind, 0)) + 1
 	var completed: bool = int(rules.snapshot()["round_number"]) == end_round
-	return {"ok": completed, "completed_rounds": rounds if completed else int(rules.snapshot()["round_number"]) - end_round + rounds, "attempts": attempts, "action_counts": action_counts, "event_counts": event_counts, "stop_reason": "configured_round_limit" if completed else "command_limit_exceeded"}
+	var victory: Dictionary = rules.state.data.get("victory", {}).duplicate(true)
+	var reason: String = "victory" if not victory.is_empty() else ("configured_round_limit" if completed else "command_limit_exceeded")
+	return {"ok": completed or not victory.is_empty(), "completed_rounds": int(rules.snapshot()["round_number"]) - start_round, "attempts": attempts, "action_counts": action_counts, "event_counts": event_counts, "victory": victory, "stop_reason": reason}
 
 func _replay(rules: RefCounted) -> Dictionary:
 	var original: Dictionary = rules.snapshot()
