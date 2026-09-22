@@ -95,7 +95,7 @@ test('native ENet authority, hidden decisions, timeout and token reconnect acros
     assert.match(forged.reason_code, /SEAT|ACTOR|AUTH|PLAYER/);
     assert.equal((await inspect()).checksum, originalChecksum, 'Forged seat command must be pure');
     const staleVersion = await send({ type: 'ready', player_id: 'p2', expected_version: 999999 }, false);
-    assert.match(staleVersion.reason_code, /STALE|VERSION/);
+    assert.equal(staleVersion.reason_code, 'STALE_STATE', 'An explicit JSON integer version must reach the domain stale-state guard');
     assert.equal((await inspect()).checksum, originalChecksum);
     const beforeRaw = client2.events.length;
     await client2.control({ op: 'raw_rpc', sequence: 1, command: { type: 'ready', player_id: 'p2', expected_version: current.snapshot.state_version } });
@@ -109,7 +109,8 @@ test('native ENet authority, hidden decisions, timeout and token reconnect acros
     current = await inspect();
     assert.equal(current.snapshot.phase, 'planning');
     const remotePlan = current.legal.p2.submit_plan.initiative_push ? { initiative_push: true } : {};
-    await send({ type: 'submit_plan', player_id: 'p2', plan: remotePlan });
+    const planResult = await send({ type: 'submit_plan', player_id: 'p2', plan: remotePlan, expected_version: current.snapshot.state_version });
+    assert.equal(planResult.state_version, current.snapshot.state_version + 1, 'A current explicit JSON integer version must pass the transport gate and execute');
     current = await inspect();
     assert.deepEqual(current.snapshot.plans.p2, remotePlan);
     assert.equal(client3.latest.state.plans?.p2, undefined, 'Other peers cannot receive the submitted plan');
