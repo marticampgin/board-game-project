@@ -2,10 +2,13 @@ extends RefCounted
 ## Class planning and the two concrete movement reaction windows.
 const Hex = preload("res://scripts/domain/hex/hex.gd")
 const Movement = preload("res://scripts/domain/resolvers/movement.gd")
+const Equipment = preload("res://scripts/domain/resolvers/equipment.gd")
 
 static func planning_options(game: RefCounted, player_id: String) -> Dictionary:
 	var hero: Dictionary = game.state.data.heroes[player_id]
 	var result: Dictionary = {"choices": ["no_change"], "initiative_push": int(hero.fate) >= 2, "snare_targets": {}, "prepared_hex_targets": {}}
+	result.purchases = Equipment.purchase_options(game, player_id)
+	result.slots = maxi(0, 3 - hero.upgrades.size())
 	if hero.class_id == "ranger" and int(hero.power) >= 1:
 		for candidate: String in Hex.range_keys(hero.hex, 2):
 			if Movement.is_walkable(game.state.data.map, candidate) and not game._is_occupied(candidate) and not game.state.data.map.sanctuaries.has(candidate):
@@ -20,7 +23,7 @@ static func planning_options(game: RefCounted, player_id: String) -> Dictionary:
 static func validate_plan(game: RefCounted, player_id: String, plan: Dictionary) -> Dictionary:
 	var options: Dictionary = planning_options(game, player_id)
 	for key: String in plan:
-		if key not in ["no_change", "initiative_push", "snare", "prepared_hex"]:
+		if key not in ["no_change", "initiative_push", "snare", "prepared_hex", "purchases"]:
 			return game._reject("INVALID_PLAN", "Unknown planning choice: " + key)
 		if key in ["no_change", "initiative_push"] and not plan[key] is bool:
 			return game._reject("INVALID_PLAN", "Planning flags must be boolean.")
@@ -30,12 +33,16 @@ static func validate_plan(game: RefCounted, player_id: String, plan: Dictionary)
 		return game._reject("INVALID_SNARE_TARGET", "Snare requires Ranger, one Power, and an eligible nearby hex.")
 	if plan.has("prepared_hex") and (not plan.prepared_hex is String or not options.prepared_hex_targets.has(plan.prepared_hex)):
 		return game._reject("INVALID_HEX_TARGET", "Prepared Hex requires Cultist, one Power, and a visible enemy.")
+	if plan.has("purchases"):
+		if not plan.purchases is Array: return game._reject("INVALID_PURCHASES", "Purchases must be an array of upgrade IDs.")
+		return Equipment.validate_purchase(game, player_id, plan.purchases)
 	return {"is_valid": true}
 
 static func apply_plans(game: RefCounted) -> void:
 	for player_id: String in ["p1", "p2", "p3", "p4"]:
 		var plan: Dictionary = game.state.data.plans[player_id]
 		var hero: Dictionary = game.state.data.heroes[player_id]
+		if plan.has("purchases"): Equipment.purchase(game, player_id, plan.purchases)
 		if plan.get("initiative_push", false):
 			hero.fate -= 2
 			hero.flags.initiative_push = 2
@@ -116,8 +123,8 @@ static func finish_move(game: RefCounted, cause: String) -> void:
 		var entered: String = movement.path[index]
 		var on_road: bool = road_edges.has(Movement.road_key(movement.path[index - 1], entered))
 		road_only = road_only and on_road
-		var terrain: String = game.state.data.map.hexes[entered].terrain
-		if entered == movement.route.get("ignored_hex", ""):
+		var terrain: String = game.state.data.map.hexes[entered].get("movement_terrain", game.state.data.map.hexes[entered].terrain)
+		if movement.route.get("waived_hexes", []).has(entered) or entered == movement.route.get("ignored_hex", ""):
 			actual_cost += 1
 		elif terrain == "swamp": actual_cost = maxi(actual_cost + 1, 4 if road_only else int(hero.move))
 		else: actual_cost += 2 if terrain == "forest" and not on_road and hero.class_id != "ranger" else 1

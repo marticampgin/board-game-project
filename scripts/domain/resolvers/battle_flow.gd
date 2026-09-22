@@ -4,6 +4,7 @@ extends RefCounted
 const Hex = preload("res://scripts/domain/hex/hex.gd")
 const Movement = preload("res://scripts/domain/resolvers/movement.gd")
 const Combat = preload("res://scripts/domain/resolvers/combat.gd")
+const Equipment = preload("res://scripts/domain/resolvers/equipment.gd")
 
 static func targets(game: RefCounted, actor: String) -> Dictionary:
 	var result: Dictionary = {}
@@ -56,6 +57,9 @@ static func validate_window(game: RefCounted, command: Dictionary) -> Dictionary
 static func declare(game: RefCounted, actor: String, target_id: String) -> void:
 	var defender_kind: String = "hero" if game.state.data.heroes.has(target_id) else "monster"
 	var target: Dictionary = game.state.data.heroes[target_id] if defender_kind == "hero" else game.state.data.monsters[target_id]
+	var attacker: Dictionary = game.state.data.heroes[actor]
+	if attacker.class_id == "warlord" and defender_kind == "hero":
+		if _tower_count(game, target_id) > _tower_count(game, actor) or _equipped_tier(game, target) > _equipped_tier(game, attacker): game._class_fate(actor, "stronger_opponent")
 	game.state.data.pending_combat = {
 		"attacker_id": actor, "defender_id": target_id, "defender_kind": defender_kind,
 		"stage": "stances", "stances": {}, "dice": {}, "calculation": {}, "rerolled": {},
@@ -79,6 +83,11 @@ static func _modifiers(game: RefCounted, attacker_id: String, defender: Dictiona
 	var attacker: Dictionary = game.state.data.heroes[attacker_id]
 	var attack_parts: Dictionary = {}
 	var defence_parts: Dictionary = {}
+	var equipment_attack: int = Equipment.passive_bonus(attacker, "attack")
+	if equipment_attack != 0: attack_parts.equipment = equipment_attack
+	if defender_kind == "hero":
+		var equipment_defence: int = Equipment.passive_bonus(defender, "defence")
+		if equipment_defence != 0: defence_parts.equipment = equipment_defence
 	if attacker.statuses.has("recovering"):
 		attack_parts.recovering = -1
 	if game.state.data.map.hexes[defender.hex].terrain == "forest":
@@ -92,6 +101,18 @@ static func _modifiers(game: RefCounted, attacker_id: String, defender: Dictiona
 			var tower_trait: Dictionary = game.definitions.tower_traits.get(location.trait, {})
 			defence_parts.controlled_tower = int(game.definitions.rules.tower_owner_defence) + int(tower_trait.get("owner_defence", 0)) + (1 if int(location.level) >= 2 else 0)
 	return {"attacker_modifier": _sum(attack_parts), "defender_modifier": _sum(defence_parts), "attacker_die_modifier": 0, "defender_die_modifier": 0, "attacker_modifiers": attack_parts, "defender_modifiers": defence_parts}
+
+static func _tower_count(game: RefCounted, player_id: String) -> int:
+	var count: int = 0
+	for location_id: String in game.state.data.heroes[player_id].controlled_locations:
+		if game.state.data.map.locations[location_id].kind in ["minor_tower", "ancient_tower", "worldspire"]: count += 1
+	return count
+
+static func _equipped_tier(game: RefCounted, hero: Dictionary) -> int:
+	var tier: int = 0
+	for upgrade_id: String in hero.upgrades:
+		tier += int(game.definitions.upgrades[upgrade_id].get("tier", 1))
+	return tier
 
 static func _sum(parts: Dictionary) -> int:
 	var total: int = 0
@@ -169,9 +190,10 @@ static func fate_decision(game: RefCounted, player_id: String, reroll: bool) -> 
 		game.state.data.heroes[player_id].fate -= 1
 		game._emit("FateSpent", player_id, {"cause": "combat_reroll", "amount": 1, "after": game.state.data.heroes[player_id].fate})
 		var old: int = battle.dice[side]
-		battle.dice[side] = game._draw("combat", 1, 6, player_id, "combat_reroll").result
+		var rolled: int = game._draw("combat", 1, 6, player_id, "combat_reroll").result
+		battle.dice[side] = Equipment.reroll_result(game, player_id, old, rolled)
 		battle.rerolled[player_id] = true
-		game._emit("CombatDieRerolled", player_id, {"before": old, "after": battle.dice[side], "keeps_new": true})
+		game._emit("CombatDieRerolled", player_id, {"before": old, "rolled": rolled, "after": battle.dice[side], "keeps_new": int(battle.dice[side]) == rolled})
 		_update_calculation(game)
 	else:
 		game._emit("FateDeclined", player_id, {"side": side})
@@ -182,7 +204,7 @@ static func _resolve(game: RefCounted) -> void:
 	var battle: Dictionary = game.state.data.pending_combat
 	var calculation: Dictionary = battle.calculation
 	game._emit("CombatResolved", battle.attacker_id, {"attacker_id": battle.attacker_id, "defender_id": battle.defender_id, "calculation": calculation.duplicate(true)})
-	if battle.defender_kind == "hero" and int(calculation.margin) > 0:
+	if battle.defender_kind == "hero" and int(calculation.margin) > 0 and game.state.data.commitments.get(battle.defender_id, {}).get("kind", "") == "ancient_capture":
 		game._cancel_commitment(battle.defender_id, "combat_contested")
 	if battle.defender_kind == "hero" and bool(calculation.drop_gold):
 		var defender: Dictionary = game.state.data.heroes[battle.defender_id]

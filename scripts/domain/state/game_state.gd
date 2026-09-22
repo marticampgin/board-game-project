@@ -141,7 +141,7 @@ static func validation_errors(values: Dictionary) -> Array[String]:
 		for field: String in ["hp", "max_hp", "attack", "defence", "speed", "move", "gold", "power", "fate"]:
 			if not (hero.get(field) is int or hero.get(field) is float) or float(hero[field]) < 0 or float(hero[field]) != floor(float(hero[field])):
 				errors.append("INVALID_HERO_STAT:%s:%s" % [player_id, field])
-		for field: String in ["relics", "controlled_locations"]:
+		for field: String in ["relics", "controlled_locations", "upgrades"]:
 			if not hero.get(field) is Array:
 				errors.append("INVALID_HERO_ARRAY:" + field)
 		for field: String in ["statuses", "flags"]:
@@ -149,6 +149,12 @@ static func validation_errors(values: Dictionary) -> Array[String]:
 				errors.append("INVALID_HERO_DICTIONARY:" + field)
 		if hero.get("hp", 0) > hero.get("max_hp", 0) or hero.get("power", 0) > catalog.rules.power_cap or hero.get("fate", 0) > catalog.rules.fate_cap:
 			errors.append("RESOURCE_CAP_EXCEEDED:" + player_id)
+		if hero.get("upgrades") is Array:
+			var equipped: Dictionary = {}
+			if hero.upgrades.size() > 3: errors.append("UPGRADE_SLOT_LIMIT")
+			for upgrade_id: Variant in hero.upgrades:
+				if not upgrade_id is String or not catalog.upgrades.has(upgrade_id) or equipped.has(upgrade_id): errors.append("UNKNOWN_OR_DUPLICATE_UPGRADE")
+				equipped[upgrade_id] = true
 	if not errors.is_empty():
 		return errors
 	for location_id: String in map.locations:
@@ -226,6 +232,7 @@ static func validation_errors(values: Dictionary) -> Array[String]:
 			errors.append("INVALID_PLAN")
 	_validate_phase_consistency(values, errors)
 	_validate_conflict_state(values, catalog, errors)
+	_validate_full_game(values, catalog, errors)
 	for index: int in values.events.size():
 		var event: Variant = values.events[index]
 		if not event is Dictionary or event.get("sequence", -1) != index + 1 or not event.get("type") is String or not event.get("data") is Dictionary:
@@ -242,7 +249,7 @@ static func _validate_phase_consistency(values: Dictionary, errors: Array[String
 		errors.append("PHASE_ACTION_CYCLE_MISMATCH")
 	if phase not in ["cycle_1", "cycle_2"] and int(values.current_actor_index) != 0:
 		errors.append("PHASE_ACTOR_INDEX_MISMATCH")
-	var initiative_resolved: bool = phase in ["initiative", "cycle_1", "cycle_2", "bonus", "resolution"]
+	var initiative_resolved: bool = phase in ["initiative", "cycle_1", "cycle_2", "bonus", "resolution", "victory"]
 	# A later World/Planning phase retains last round's order for the HUD.
 	var needs_order: bool = initiative_resolved or int(values.round_number) > 1
 	if values.initiative_order.size() != (4 if needs_order else 0):
@@ -267,6 +274,84 @@ static func _validate_phase_consistency(values: Dictionary, errors: Array[String
 
 static func _integer(value: Variant) -> bool:
 	return (value is int or value is float) and is_finite(float(value)) and float(value) == floor(float(value))
+
+static func _validate_full_game(values: Dictionary, catalog: RefCounted, errors: Array[String]) -> void:
+	for field: String in ["victory_claims", "victory", "pending_exploration"]:
+		if not values.get(field) is Dictionary: errors.append("INVALID_FULL_GAME_FIELD:" + field)
+	if not values.get("world_effects") is Array or not values.get("market_hex") is String: errors.append("INVALID_WORLD_STATE")
+	if not errors.is_empty(): return
+	if not values.market_hex.is_empty() and not values.map.hexes.has(values.market_hex): errors.append("INVALID_MARKET_HEX")
+	if not _integer(values.get("last_world_event_round")) or int(values.get("last_world_event_round", -1)) < 0 or int(values.get("last_world_event_round", -1)) > int(values.round_number): errors.append("INVALID_WORLD_EVENT_ROUND")
+	for field: String in ["bridge_edges", "blocked_edges"]:
+		if not values.map.get(field) is Array: errors.append("INVALID_WORLD_MAP_FIELD:" + field)
+		else:
+			for edge: Variant in values.map[field]:
+				if not _valid_edge(edge, values.map.hexes): errors.append("INVALID_WORLD_MAP_EDGE:" + field)
+	for location: Dictionary in values.map.locations.values():
+		if not _integer(location.get("world_income_bonus")) or not _integer(location.get("world_defence_modifier")): errors.append("INVALID_WORLD_LOCATION_MODIFIER")
+		if location.kind == "ruin" and (not location.get("exhausted") is bool or not location.get("relic_available") is bool): errors.append("INVALID_RUIN_STATE")
+	for claim_id: String in values.victory_claims:
+		var claim: Variant = values.victory_claims[claim_id]
+		if not claim is Dictionary:
+			errors.append("INVALID_VICTORY_CLAIM")
+			continue
+		if not values.heroes.has(claim.get("player_id", "")) or claim.get("route", "") not in ["conquest", "dominion"]:
+			errors.append("INVALID_CLAIM_ROUTE_OR_PLAYER")
+		if not _integer(claim.get("created_round")) or not _integer(claim.get("required_round")):
+			errors.append("INVALID_CLAIM_ROUND")
+		elif int(claim.created_round) < 1 or int(claim.created_round) > int(values.round_number) or int(claim.required_round) != int(claim.created_round) + 1:
+			errors.append("INVALID_CLAIM_RESPONSE_WINDOW")
+	if values.phase == "victory":
+		if values.victory.is_empty() or not values.victory.get("winners") is Array or values.victory.get("route", "") not in ["conquest", "dominion", "ascension", "shared"]:
+			errors.append("INVALID_VICTORY_RESULT")
+		elif values.victory.winners.is_empty(): errors.append("MISSING_WINNER")
+		else:
+			var winner_seen: Dictionary = {}
+			for player_id: Variant in values.victory.winners:
+				if not values.heroes.has(player_id) or winner_seen.has(player_id): errors.append("INVALID_WINNER")
+				winner_seen[player_id] = true
+	elif not values.victory.is_empty(): errors.append("VICTORY_PHASE_MISMATCH")
+	var pending: Dictionary = values.pending_exploration
+	if not pending.is_empty():
+		if values.phase not in ["cycle_1", "cycle_2"] or not values.pending_combat.is_empty() or not values.pending_reaction.is_empty(): errors.append("INVALID_EXPLORATION_PHASE")
+		if not values.heroes.has(pending.get("player_id", "")): errors.append("INVALID_EXPLORATION_PLAYER")
+		elif int(values.current_actor_index) >= 0 and int(values.current_actor_index) < values.initiative_order.size():
+			if pending.player_id != values.initiative_order[values.current_actor_index]: errors.append("INVALID_EXPLORATION_ACTOR")
+		if not values.map.locations.has(pending.get("location_id", "")): errors.append("INVALID_EXPLORATION_LOCATION")
+		if pending.get("kind", "") != "ruin" or not pending.get("choices") is Dictionary or not pending.get("dark_bargain") is bool or pending.get("action", "") not in ["explore", "special"]: errors.append("INVALID_EXPLORATION_FIELDS")
+		if not errors.is_empty(): return
+		var ruin: Dictionary = values.map.locations[pending.location_id]
+		var explorer: Dictionary = values.heroes[pending.player_id]
+		if ruin.kind != "ruin" or ruin.exhausted or pending.get("hex", "") != ruin.hex or explorer.hex != ruin.hex: errors.append("EXPLORATION_REQUIREMENTS_LOST")
+		if pending.choices.size() != 2: errors.append("INVALID_REWARD_CHOICE_COUNT")
+		for reward_id: String in pending.choices:
+			if not catalog.rewards.ruin_rewards.has(reward_id) or canonical_json(pending.choices[reward_id]) != canonical_json(catalog.rewards.ruin_rewards[reward_id]): errors.append("INVALID_PENDING_REWARD")
+		if pending.dark_bargain and (explorer.class_id != "cultist" or int(explorer.hp) <= 2 or pending.action != "special"): errors.append("INVALID_PENDING_DARK_BARGAIN")
+		if not pending.dark_bargain and pending.action != "explore": errors.append("INVALID_PENDING_EXPLORE_ACTION")
+	for effect: Variant in values.world_effects:
+		if not effect is Dictionary:
+			errors.append("INVALID_WORLD_EFFECT")
+			continue
+		if not catalog.world_events.has(effect.get("event_id", "")) or not _integer(effect.get("started_round")) or not _integer(effect.get("expires_round")) or effect.get("expiry", "") not in ["world", "resolution"]:
+			errors.append("INVALID_WORLD_EFFECT_FIELDS")
+			continue
+		if int(effect.started_round) < 1 or int(effect.started_round) > int(values.round_number) or int(effect.expires_round) < int(effect.started_round): errors.append("INVALID_WORLD_EFFECT_DURATION")
+		match str(effect.event_id):
+			"collapsed_bridge":
+				if not _valid_edge(effect.get("edge"), values.map.hexes): errors.append("INVALID_COLLAPSED_BRIDGE")
+			"unstable_leyline":
+				if not values.map.locations.has(effect.get("location_id", "")): errors.append("INVALID_LEYLINE_LOCATION")
+			"cursed_ground":
+				if not effect.get("hexes") is Array: errors.append("INVALID_CURSED_REGION")
+				else:
+					for hex_id: Variant in effect.hexes:
+						if not values.map.hexes.has(hex_id): errors.append("INVALID_CURSED_HEX")
+			"wandering_market":
+				if not values.map.hexes.has(effect.get("hex", "")): errors.append("INVALID_WANDERING_MARKET")
+			_: errors.append("INVALID_TEMPORARY_WORLD_EFFECT")
+
+static func _valid_edge(value: Variant, hexes: Dictionary) -> bool:
+	return value is Array and value.size() == 2 and value[0] is String and value[1] is String and value[0] != value[1] and hexes.has(value[0]) and hexes.has(value[1])
 
 static func _validate_conflict_state(values: Dictionary, catalog: RefCounted, errors: Array[String]) -> void:
 	for field: String in ["monsters", "pending_combat", "pending_reaction", "pending_move", "traps", "commitments", "ground_loot", "cycle_2_modifiers"]:
@@ -300,10 +385,20 @@ static func _validate_conflict_state(values: Dictionary, catalog: RefCounted, er
 	for player_id: String in values.plans:
 		var plan: Dictionary = values.plans[player_id]
 		for key: String in plan:
-			if key not in ["no_change", "initiative_push", "snare", "prepared_hex"]: errors.append("UNKNOWN_PLANNING_CHOICE")
+			if key not in ["no_change", "initiative_push", "snare", "prepared_hex", "purchases"]: errors.append("UNKNOWN_PLANNING_CHOICE")
 			if key in ["no_change", "initiative_push"] and not plan[key] is bool: errors.append("INVALID_PLANNING_FLAG")
 		if plan.has("snare") and (values.heroes[player_id].class_id != "ranger" or not values.map.hexes.has(plan.snare)): errors.append("INVALID_SNARE_PLAN")
 		if plan.has("prepared_hex") and (values.heroes[player_id].class_id != "cultist" or not values.heroes.has(plan.prepared_hex) or plan.prepared_hex == player_id): errors.append("INVALID_PREPARED_HEX_PLAN")
+		if plan.has("purchases"):
+			if not plan.purchases is Array: errors.append("INVALID_PURCHASE_PLAN")
+			else:
+				var purchase_ids: Dictionary = {}
+				var cost: int = 0
+				for upgrade_id: Variant in plan.purchases:
+					if not upgrade_id is String or not catalog.upgrades.has(upgrade_id) or purchase_ids.has(upgrade_id): errors.append("INVALID_PURCHASE_DEFINITION")
+					else: cost += int(catalog.upgrades[upgrade_id].cost)
+					purchase_ids[upgrade_id] = true
+				if values.phase == "planning" and (cost > int(values.heroes[player_id].gold) or plan.purchases.size() + values.heroes[player_id].upgrades.size() > 3): errors.append("UNAFFORDABLE_PURCHASE_PLAN")
 		if values.phase == "planning":
 			if plan.get("initiative_push", false) and int(values.heroes[player_id].fate) < 2: errors.append("UNAFFORDABLE_PLAN")
 			if (plan.has("snare") or plan.has("prepared_hex")) and int(values.heroes[player_id].power) < 1: errors.append("UNAFFORDABLE_PLAN")
@@ -317,8 +412,10 @@ static func _validate_conflict_state(values: Dictionary, catalog: RefCounted, er
 			errors.append("INVALID_COMMITMENT")
 			continue
 		var location: Dictionary = values.map.locations[commitment.location_id]
-		if commitment.get("kind", "") != "ancient_capture" or location.kind not in ["ancient_tower", "worldspire"] or commitment.get("hex", "") != location.hex or values.heroes[player_id].hex != location.hex or location.owner_id == player_id:
+		if commitment.get("kind", "") not in ["ancient_capture", "ritual"] or location.kind not in ["ancient_tower", "worldspire"] or commitment.get("hex", "") != location.hex or values.heroes[player_id].hex != location.hex:
 			errors.append("COMMITMENT_REQUIREMENTS_LOST")
+		elif commitment.kind == "ancient_capture" and location.owner_id == player_id: errors.append("CAPTURE_ALREADY_CONTROLLED")
+		elif commitment.kind == "ritual" and (location.kind != "worldspire" or values.heroes[player_id].relics.size() < int(catalog.victory.ascension.relics)): errors.append("RITUAL_REQUIREMENTS_LOST")
 	if not values.next_cycle_order.is_empty():
 		var next_seen: Dictionary = {}
 		for player_id: Variant in values.next_cycle_order:

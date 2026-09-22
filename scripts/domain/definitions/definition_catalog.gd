@@ -6,6 +6,10 @@ var tower_traits: Dictionary = {}
 var rules: Dictionary = {}
 var monsters: Dictionary = {}
 var stances: Dictionary = {}
+var upgrades: Dictionary = {}
+var world_events: Dictionary = {}
+var rewards: Dictionary = {}
+var victory: Dictionary = {}
 var errors: Array[String] = []
 
 func _init() -> void:
@@ -14,6 +18,10 @@ func _init() -> void:
 	rules = _load_table("res://data/rules.json")
 	monsters = _load_table("res://data/monsters.json")
 	stances = _load_table("res://data/stances.json")
+	upgrades = _load_table("res://data/upgrades.json")
+	world_events = _load_table("res://data/world_events.json")
+	rewards = _load_table("res://data/rewards.json")
+	victory = _load_table("res://data/victory.json")
 	for class_id: String in classes:
 		var definition: Dictionary = classes[class_id]
 		for field: String in ["hp", "attack", "defence", "speed", "move"]:
@@ -39,4 +47,4 @@ func _load_table(path: String) -> Dictionary:
 	return parsed
 
 func export_table() -> Dictionary:
-	return {"classes": classes.duplicate(true), "tower_traits": tower_traits.duplicate(true), "monsters": monsters.duplicate(true), "stances": stances.duplicate(true), "rules": rules.duplicate(true), "errors": errors.duplicate()}
+	return {"classes": classes.duplicate(true), "tower_traits": tower_traits.duplicate(true), "monsters": monsters.duplicate(true), "stances": stances.duplicate(true), "upgrades": upgrades.duplicate(true), "world_events": world_events.duplicate(true), "rewards": rewards.duplicate(true), "victory": victory.duplicate(true), "rules": rules.duplicate(true), "errors": errors.duplicate()}

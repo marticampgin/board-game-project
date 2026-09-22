@@ -13,6 +13,10 @@ const Movement = preload("res://scripts/domain/resolvers/movement.gd")
 const Rng = preload("res://scripts/services/deterministic_rng.gd")
 const Battle = preload("res://scripts/domain/resolvers/battle_flow.gd")
 const Classes = preload("res://scripts/domain/resolvers/class_flow.gd")
+const Economy = preload("res://scripts/domain/resolvers/economy.gd")
+const Victory = preload("res://scripts/domain/resolvers/victory.gd")
+const Content = preload("res://scripts/domain/resolvers/exploration.gd")
+const Equipment = preload("res://scripts/domain/resolvers/equipment.gd")
 
 var state: State
 var definitions: Catalog
@@ -62,7 +66,8 @@ func _start_game(seed: int) -> void:
 		"heroes": heroes, "map": map, "plans": {}, "ready": [], "rng": _rng.snapshot(),
 		"command_sequence": 0, "event_sequence": 0, "state_version": 0, "events": [], "commands": [],
 		"monsters": {}, "pending_combat": {}, "pending_reaction": {}, "pending_move": {},
-		"traps": {}, "commitments": {}, "ground_loot": {}, "cycle_2_modifiers": {}, "next_cycle_order": []
+		"traps": {}, "commitments": {}, "ground_loot": {}, "cycle_2_modifiers": {}, "next_cycle_order": [],
+		"victory_claims": {}, "victory": {}
 	})
 	for index: int in range(4):
 		var monster_id: String = "monster_%d" % (index + 1)
@@ -70,6 +75,7 @@ func _start_game(seed: int) -> void:
 		var profile: Dictionary = definitions.monsters[profile_id]
 		var camp_id: String = "camp_%d" % (index + 1)
 		state.data.monsters[monster_id] = {"id": monster_id, "definition_id": profile_id, "name": profile.name, "camp_id": camp_id, "hex": map.locations[camp_id].hex, "hp": int(profile.hp), "max_hp": int(profile.hp), "attack": int(profile.attack), "defence": int(profile.defence)}
+	Content.initialize(self)
 	_emit("GameCreated", "", {"seed": seed, "content_version": definitions.rules.content_version, "map_report": map.report})
 	_emit("RoundStarted", "", {"round": 1, "world_event": "none_first_round"})
 	for player_id: String in Enums.PLAYER_IDS:
@@ -81,6 +87,9 @@ func snapshot() -> Dictionary:
 
 func checksum() -> String:
 	return state.checksum()
+
+func victory_progress(player_id: String) -> Dictionary:
+	return Victory.progress(self, player_id) if state.data.heroes.has(player_id) else {}
 
 func current_actor() -> String:
 	if state.data.phase not in ["cycle_1", "cycle_2"]:
@@ -134,6 +143,7 @@ func execute(command: Dictionary) -> Dictionary:
 		"special":
 			_start_action(player_id, kind)
 			if command.special_id == "forced_march": Classes.begin_move(self, player_id, command.target, true)
+			elif command.special_id == "dark_bargain": Content.begin_explore(self, player_id, true, bool(command.get("use_fate", false)))
 			else:
 				var hero: Dictionary = state.data.heroes[player_id]
 				var before: int = hero.hp
@@ -144,6 +154,23 @@ func execute(command: Dictionary) -> Dictionary:
 			_start_action(player_id, kind)
 			_upgrade(player_id)
 			_finish_action(player_id, kind)
+		"trade":
+			_start_action(player_id, kind)
+			Economy.trade(self, player_id, command.direction)
+			_finish_action(player_id, kind)
+		"explore":
+			_start_action(player_id, kind)
+			Content.begin_explore(self, player_id, false, bool(command.get("use_fate", false)))
+		"choose_reward": Content.choose(self, command)
+		"begin_ritual":
+			_start_action(player_id, kind)
+			Victory.begin_ritual(self, player_id)
+			_finish_action(player_id, kind)
+		"complete_ritual":
+			_start_action(player_id, kind)
+			_emit("ActionCompleted", player_id, {"action": kind, "cycle": state.data.action_cycle})
+			Victory.complete_ritual(self, player_id)
+	Victory.cancel_invalid(self)
 	state.data.command_sequence += 1
 	state.data.state_version += 1
 	state.data.commands.append(command.duplicate(true))
@@ -158,6 +185,7 @@ func _validate(command: Dictionary) -> Dictionary:
 		return _reject("INVALID_COMMAND", "A command requires a string type and serializable payload.")
 	if not Enums.COMMAND_IDS.has(command.type):
 		return _reject("UNKNOWN_COMMAND", "Unknown command: " + command.type)
+	if state.data.phase == "victory": return _reject("MATCH_FINISHED", "The match has ended. Start a new match to play again.")
 	if command.has("expected_version"):
 		if not (command.expected_version is int or command.expected_version is float) or command.expected_version != state.data.state_version:
 			return _reject("STALE_STATE", "Expected state version does not match authoritative state.")
@@ -169,6 +197,7 @@ func _validate(command: Dictionary) -> Dictionary:
 		for previous: Dictionary in state.data.commands:
 			if previous.get("command_id", "") == command.command_id:
 				return _reject("DUPLICATE_COMMAND", "This command ID has already been accepted.")
+	if not state.data.pending_exploration.is_empty(): return Content.validate_choice(self, command)
 	if not state.data.pending_reaction.is_empty() or not state.data.pending_combat.is_empty():
 		if not command.get("player_id") is String or not state.data.heroes.has(command.player_id):
 			return _reject("UNKNOWN_PLAYER", "A pending decision requires its participant's player ID.")
@@ -212,20 +241,30 @@ func _validate(command: Dictionary) -> Dictionary:
 	if command.type == "attack" and not Battle.targets(self, player_id).has(command.get("target_id", "")):
 		return _reject("TARGET_OUT_OF_RANGE", "Attack requires an adjacent target that is not Recovering.")
 	if command.type == "upgrade": return _upgrade_validation(player_id)
+	if command.type == "trade" and not Economy.trade_options(self, player_id).has(command.get("direction", "")):
+		return _reject("TRADE_NOT_AVAILABLE", "Choose an affordable market exchange at a neutral or controlled Settlement.")
+	if command.type == "explore": return Content.validate_explore(self, command)
+	if command.type in ["begin_ritual", "complete_ritual"]:
+		var eligible: bool = Victory.progress(self, player_id).ascension.eligible
+		var ritual_active: bool = state.data.commitments.get(player_id, {}).get("kind", "") == "ritual"
+		if not eligible: return _reject("RITUAL_REQUIREMENTS_LOST", "Stand on the Worldspire with three Relics.")
+		if command.type == "begin_ritual" and ritual_active: return _reject("RITUAL_ALREADY_ACTIVE", "Complete the ritual on this scheduled action.")
+		if command.type == "complete_ritual" and not ritual_active: return _reject("NO_RITUAL", "Begin a ritual on an earlier scheduled action first.")
 	if command.type == "special":
 		var choices: Dictionary = _special_choices(player_id)
 		if not choices.has(command.get("special_id", "")):
 			return _reject("SPECIAL_NOT_AVAILABLE", "This class, location, or resource state does not permit the Special.")
 		if command.special_id == "forced_march" and not choices.forced_march.targets.has(command.get("target", "")):
 			return _reject("TARGET_OUT_OF_RANGE", "Choose a legal Forced March destination.")
-	if command.type in ["choose_stance", "spend_fate", "decline_fate", "displace", "resolve_reaction"]:
+		if command.special_id == "dark_bargain": return Content.validate_explore(self, command)
+	if command.type in ["choose_stance", "spend_fate", "decline_fate", "displace", "resolve_reaction", "choose_reward"]:
 		return _reject("NO_PENDING_WINDOW", "This decision requires an open combat or reaction window.")
 	return {"is_valid": true}
 
 func _capture_validation(player_id: String) -> Dictionary:
 	var location: Dictionary = _hero_location(player_id)
-	if location.is_empty() or location.kind not in ["minor_tower", "ancient_tower", "worldspire"]:
-		return _reject("NOT_CAPTURABLE", "Stand on a Tower to Capture.")
+	if location.is_empty() or location.kind not in ["minor_tower", "ancient_tower", "worldspire", "settlement"]:
+		return _reject("NOT_CAPTURABLE", "Stand on a Tower or Settlement to Capture.")
 	if location.owner_id == player_id:
 		return _reject("ALREADY_CONTROLLED", "This hero already controls the tower.")
 	if not location.discovered_by.has(player_id):
@@ -238,6 +277,8 @@ func _capture_validation(player_id: String) -> Dictionary:
 func legal_actions(player_id: String) -> Dictionary:
 	if not state.data.heroes.has(player_id):
 		return {}
+	if state.data.phase == "victory": return {}
+	if not state.data.pending_exploration.is_empty(): return Content.exploration_legal(self, player_id)
 	if not state.data.pending_reaction.is_empty():
 		if state.data.pending_reaction.actor_id == player_id:
 			return {"resolve_reaction": {"choices": state.data.pending_reaction.choices.duplicate(), "kind": state.data.pending_reaction.kind}}
@@ -254,19 +295,27 @@ func legal_actions(player_id: String) -> Dictionary:
 	var actions: Dictionary = {"pass": {}, "move": {"targets": _movement_targets(player_id)}}
 	if _capture_validation(player_id).is_valid:
 		var location: Dictionary = _hero_location(player_id)
-		actions.capture = {"location_id": location.id, "automatic": str(location.owner_id).is_empty(), "defence": _tower_defence(location), "commitment": location.kind != "minor_tower", "completing": state.data.commitments.has(player_id)}
+		actions.capture = {"location_id": location.id, "automatic": str(location.owner_id).is_empty() or location.kind == "settlement", "defence": _tower_defence(location), "commitment": location.kind in ["ancient_tower", "worldspire"], "completing": state.data.commitments.get(player_id, {}).get("kind", "") == "ancient_capture"}
 	var attack_targets: Dictionary = Battle.targets(self, player_id)
 	if not attack_targets.is_empty(): actions.attack = {"targets": attack_targets}
 	var specials: Dictionary = _special_choices(player_id)
 	if not specials.is_empty(): actions.special = {"choices": specials}
 	if _upgrade_validation(player_id).is_valid:
 		var location: Dictionary = _hero_location(player_id)
-		actions.upgrade = {"location_id": location.id, "cost": 3 if int(location.level) == 1 else 5, "next_level": int(location.level) + 1}
+		actions.upgrade = {"location_id": location.id, "cost": Equipment.tower_upgrade_cost(state.data.heroes[player_id], 3 if int(location.level) == 1 else 5), "next_level": int(location.level) + 1}
+	var market: Dictionary = Economy.trade_options(self, player_id)
+	if not market.is_empty(): actions.trade = {"choices": market}
+	var exploration: Dictionary = Content.explore_options(self, player_id)
+	if not exploration.is_empty(): actions.explore = exploration
+	if Victory.progress(self, player_id).ascension.eligible:
+		if state.data.commitments.get(player_id, {}).get("kind", "") == "ritual": actions.complete_ritual = {}
+		else: actions.begin_ritual = {}
 	return actions
 
 func _advance() -> void:
 	match str(state.data.phase):
 		"world":
+			Content.world_phase(self)
 			for hero: Dictionary in state.data.heroes.values():
 				if not hero.prepared_hex.is_empty() and int(hero.prepared_hex.expires_planning_round) <= int(state.data.round_number): hero.prepared_hex = {}
 			_set_phase("planning")
@@ -292,7 +341,7 @@ func _roll_initiative() -> void:
 		var roll: Dictionary = _draw("initiative", 1, 3, player_id, "initiative")
 		var speed: int = state.data.heroes[player_id].speed
 		var hero: Dictionary = state.data.heroes[player_id]
-		var modifier: int = int(hero.flags.get("initiative_push", 0)) + int(hero.statuses.get("next_round_initiative", {}).get("amount", 0))
+		var modifier: int = int(hero.flags.get("initiative_push", 0)) + int(hero.statuses.get("next_round_initiative", {}).get("amount", 0)) + Equipment.passive_bonus(hero, "initiative")
 		hero.statuses.erase("next_round_initiative")
 		scores[player_id] = speed + int(roll.result) + modifier
 		_emit("InitiativeRolled", player_id, {"speed": speed, "die": roll.result, "modifier": modifier, "score": scores[player_id]})
@@ -326,7 +375,9 @@ func _draw(stream: String, minimum: int, maximum: int, actor: String, cause: Str
 	return roll
 
 func _start_action(player_id: String, kind: String) -> void:
-	if kind != "capture": _cancel_commitment(player_id, "different_action")
+	var commitment_kind: String = state.data.commitments.get(player_id, {}).get("kind", "")
+	if not ((kind == "capture" and commitment_kind == "ancient_capture") or (kind == "complete_ritual" and commitment_kind == "ritual")):
+		_cancel_commitment(player_id, "different_action")
 	_emit("ActionStarted", player_id, {"action": kind, "cycle": state.data.action_cycle, "actor_index": state.data.current_actor_index})
 
 func _finish_action(player_id: String, kind: String) -> void:
@@ -371,7 +422,9 @@ func _movement_targets(player_id: String, forced: bool = false) -> Dictionary:
 		if int(state.data.monsters[monster_id].hp) > 0: blockers[monster_id] = {"hex": state.data.monsters[monster_id].hex}
 	for other_id: String in state.data.heroes:
 		if other_id != player_id: blockers["sanctuary_" + other_id] = {"hex": state.data.heroes[other_id].sanctuary}
-	return Movement.reachable(state.data.map, blockers, player_id, {"forced_march": forced})
+	var options: Dictionary = Equipment.movement_options(state.data.heroes[player_id])
+	options.forced_march = forced
+	return Movement.reachable(state.data.map, blockers, player_id, options)
 
 func _special_choices(player_id: String) -> Dictionary:
 	var choices: Dictionary = {}
@@ -381,6 +434,8 @@ func _special_choices(player_id: String) -> Dictionary:
 		choices.rest = {"healing": 3}
 	if hero.class_id == "warlord" and int(hero.power) >= 1:
 		choices.forced_march = {"power_cost": 1, "initiative_modifier": 2, "targets": _movement_targets(player_id, true)}
+	if hero.class_id == "cultist" and int(hero.hp) > 2 and not location.is_empty() and location.kind == "ruin" and not location.get("exhausted", false):
+		choices.dark_bargain = {"health_cost": 2, "power_gain": 2, "fate_trigger": true, "exploration": Content.explore_options(self, player_id)}
 	return choices
 
 func _upgrade_validation(player_id: String) -> Dictionary:
@@ -388,15 +443,16 @@ func _upgrade_validation(player_id: String) -> Dictionary:
 	if location.is_empty() or location.kind not in ["minor_tower", "ancient_tower", "worldspire"] or location.owner_id != player_id:
 		return _reject("UPGRADE_NOT_AVAILABLE", "Stand on your controlled Tower to Upgrade.")
 	if int(location.level) >= 3: return _reject("MAX_LEVEL", "Tower level is capped at three.")
-	var cost: int = 3 if int(location.level) == 1 else 5
+	var cost: int = Equipment.tower_upgrade_cost(state.data.heroes[player_id], 3 if int(location.level) == 1 else 5)
 	if int(state.data.heroes[player_id].gold) < cost:
 		return _reject("INSUFFICIENT_GOLD", "Upgrade costs %d Gold." % cost)
 	return {"is_valid": true}
 
 func _upgrade(player_id: String) -> void:
 	var location: Dictionary = _hero_location(player_id)
-	var cost: int = 3 if int(location.level) == 1 else 5
+	var cost: int = Equipment.tower_upgrade_cost(state.data.heroes[player_id], 3 if int(location.level) == 1 else 5)
 	state.data.heroes[player_id].gold -= cost
+	Equipment.consume_tower_kit(self, player_id)
 	location.level += 1
 	_emit("LocationUpgraded", player_id, {"location_id": location.id, "level": location.level, "gold_cost": cost, "benefit": "+1 Defence" if int(location.level) == 2 else "+1 income"})
 
@@ -404,7 +460,7 @@ func _cancel_commitment(player_id: String, cause: String) -> void:
 	if not state.data.commitments.has(player_id): return
 	var commitment: Dictionary = state.data.commitments[player_id]
 	state.data.commitments.erase(player_id)
-	_emit("LocationCaptureCanceled", player_id, {"location_id": commitment.location_id, "cause": cause})
+	_emit("RitualCanceled" if commitment.kind == "ritual" else "LocationCaptureCanceled", player_id, {"location_id": commitment.location_id, "cause": cause})
 
 func _modify_next_cycle(player_id: String, amount: int, cause: String) -> void:
 	if state.data.phase == "cycle_1":
@@ -429,9 +485,15 @@ func _gain_fate(player_id: String, amount: int, cause: String) -> void:
 	hero.fate = mini(int(definitions.rules.fate_cap), before + amount)
 	_emit("FateGained", player_id, {"cause": cause, "amount": int(hero.fate) - before, "before": before, "after": hero.fate})
 
+func _class_fate(player_id: String, cause: String) -> void:
+	var hero: Dictionary = state.data.heroes[player_id]
+	if hero.flags.get("class_fate", false): return
+	hero.flags.class_fate = true
+	_gain_fate(player_id, 1, "class_" + cause)
+
 func _tower_defence(location: Dictionary) -> int:
 	var tower_trait: Dictionary = definitions.tower_traits.get(location.trait, {})
-	return int(definitions.rules.tower_defence) + (1 if int(location.level) >= 2 else 0) + int(tower_trait.get("tower_defence", 0))
+	return int(definitions.rules.tower_defence) + (1 if int(location.level) >= 2 else 0) + int(tower_trait.get("tower_defence", 0)) + int(location.get("world_defence_modifier", 0))
 
 func _capture(player_id: String) -> void:
 	var location: Dictionary = _hero_location(player_id)
@@ -447,9 +509,10 @@ func _capture(player_id: String) -> void:
 		var attack_bonus: int = 1 if hero.class_id == "warlord" else 0
 		if hero.statuses.has("recovering"): attack_bonus -= 1
 		var roll: Dictionary = _draw("combat", 1, 6, player_id, "tower_capture")
-		var total: int = int(hero.attack) + attack_bonus + int(roll.result)
+		var equipment_attack: int = Equipment.passive_bonus(hero, "attack")
+		var total: int = int(hero.attack) + attack_bonus + equipment_attack + int(roll.result)
 		var defence: int = _tower_defence(location)
-		_emit("TowerCaptureResolved", player_id, {"location_id": location.id, "attack": hero.attack, "martial_presence": attack_bonus, "die": roll.result, "total": total, "defence": defence, "success": total > defence})
+		_emit("TowerCaptureResolved", player_id, {"location_id": location.id, "attack": hero.attack, "martial_presence": attack_bonus, "equipment_attack": equipment_attack, "die": roll.result, "total": total, "defence": defence, "success": total > defence})
 		if total <= defence:
 			return
 	if not previous_owner.is_empty():
@@ -461,7 +524,7 @@ func _capture(player_id: String) -> void:
 
 func _discover(player_id: String, from_hex: String = "") -> void:
 	var hero: Dictionary = state.data.heroes[player_id]
-	var origins: Array = [{"hex": hero.hex if from_hex.is_empty() else from_hex, "radius": int(definitions.rules.discovery_radius)}]
+	var origins: Array = [{"hex": hero.hex if from_hex.is_empty() else from_hex, "radius": int(definitions.rules.discovery_radius) + Equipment.passive_bonus(hero, "discovery")}]
 	for location_id: String in hero.controlled_locations:
 		var controlled: Dictionary = state.data.map.locations[location_id]
 		var tower_trait: Dictionary = definitions.tower_traits.get(controlled.trait, {})
@@ -477,30 +540,15 @@ func _discover(player_id: String, from_hex: String = "") -> void:
 			if Hex.distance(origin.hex, location.hex) <= int(origin.radius):
 				location.discovered_by.append(player_id)
 				_emit("LocationDiscovered", player_id, {"location_id": location_id, "hex": location.hex, "kind": location.kind, "trait": location.trait})
+				if hero.class_id == "ranger" and int(state.data.command_sequence) > 0: _class_fate(player_id, "discovery")
 				break
+	Content.update_hints(self, player_id)
 
 func _resolve_round() -> void:
 	_emit("ResolutionStarted", "", {"order": ["claims", "income", "new_claims", "recovery", "statuses", "flags", "fate", "snapshot"]})
-	var location_ids: Array = state.data.map.locations.keys()
-	location_ids.sort()
-	for location_id: String in location_ids:
-		var location: Dictionary = state.data.map.locations[location_id]
-		var owner_id: String = location.owner_id
-		if owner_id.is_empty():
-			continue
-		var hero: Dictionary = state.data.heroes[owner_id]
-		var resource: String = "power"
-		var amount: int = 0
-		match str(location.kind):
-			"minor_tower": amount = int(definitions.rules.minor_tower_income)
-			"ancient_tower", "worldspire": amount = int(definitions.rules.ancient_tower_income)
-			"settlement":
-				resource = "gold"
-				amount = int(definitions.rules.settlement_income)
-		if int(location.level) == 3: amount += 1
-		var before: int = hero[resource]
-		hero[resource] = mini(before + amount, int(definitions.rules.power_cap)) if resource == "power" else before + amount
-		_emit("IncomeGranted", owner_id, {"location_id": location_id, "resource": resource, "amount": int(hero[resource]) - before, "base_amount": amount, "before": before, "after": hero[resource], "capped": int(hero[resource]) < before + amount})
+	if Victory.confirm_existing(self): return
+	Economy.income(self)
+	Victory.create_claims(self)
 	for player_id: String in Enums.PLAYER_IDS:
 		var hero: Dictionary = state.data.heroes[player_id]
 		if not hero.flags.get("downed_this_round", false):
@@ -521,6 +569,7 @@ func _resolve_round() -> void:
 	for owner_id: String in state.data.traps.keys():
 		_emit("TrapExpired", owner_id, {"hex": state.data.traps[owner_id].hex})
 	state.data.traps = {}
+	Content.resolution_expiry(self)
 	for player_id: String in Enums.PLAYER_IDS:
 		var hero: Dictionary = state.data.heroes[player_id]
 		var before: int = hero.fate
@@ -536,7 +585,7 @@ func _resolve_round() -> void:
 			_emit("StatusExpired", player_id, {"status_id": "recovering"})
 	state.data.current_actor_index = 0
 	_set_phase("world")
-	_emit("RoundStarted", "", {"round": state.data.round_number, "world_event": "deferred_milestone_3"})
+	_emit("RoundStarted", "", {"round": state.data.round_number, "world_event": "awaiting_world_phase"})
 
 func _emit(event_type: String, actor_id: String, details: Dictionary, visibility: String = "public") -> void:
 	state.data.event_sequence += 1
